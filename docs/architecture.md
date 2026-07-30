@@ -44,7 +44,8 @@ Ideas worth adopting:
 provider adapters
   ├── codex
   ├── claude
-  └── grok
+  ├── grok
+  └── gemini
         │
         ▼
 normalized UsageSnapshot JSON

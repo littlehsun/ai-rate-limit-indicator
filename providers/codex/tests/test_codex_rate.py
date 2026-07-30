@@ -4,7 +4,14 @@ import unittest
 from datetime import timezone, timedelta
 from pathlib import Path
 
-from codex_rate import CodexRateSnapshot, find_latest_snapshot, format_indicator_label, format_updated_at
+from codex_rate import (
+    CodexRateSnapshot,
+    RateWindow,
+    find_latest_snapshot,
+    format_indicator_label,
+    format_menu_line,
+    format_updated_at,
+)
 
 
 class CodexRateTests(unittest.TestCase):
@@ -112,6 +119,16 @@ class CodexRateTests(unittest.TestCase):
         label = format_updated_at("2026-05-05T10:01:45.409Z", tz=local_tz)
 
         self.assertEqual(label, "2026-05-05 18:01")
+
+    def test_formats_claude_style_menu_with_countdown_in_parentheses(self):
+        line = format_menu_line(
+            RateWindow(used_percent=42, window_minutes=300, resets_at=1777929435),
+            "⚡ 5H",
+            now=1777911600,
+        )
+
+        self.assertTrue(line.startswith("⚡ 5H: 42%  ⟳ "))
+        self.assertTrue(line.endswith("(4h57m)"))
 
     def _token_count(self, timestamp, five_hour_pct, weekly_pct):
         return {

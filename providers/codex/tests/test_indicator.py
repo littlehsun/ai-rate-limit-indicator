@@ -226,7 +226,7 @@ class IndicatorTests(unittest.TestCase):
         self.assertNotIn(">|</tspan>", svg)
         self.assertIn('<tspan fill="#FFFFFF">  ⟳7d0h</tspan>', svg)
         self.assertFalse(app.item_5h.visible)
-        self.assertTrue(app.item_weekly.label.startswith("7d:"))
+        self.assertTrue(app.item_weekly.label.startswith("📅 7D:"))
 
     def test_wham_source_shows_reset_credits_without_source_or_account_details(self):
         snapshot = CodexRateSnapshot(

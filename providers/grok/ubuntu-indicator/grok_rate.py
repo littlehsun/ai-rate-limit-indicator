@@ -516,7 +516,7 @@ def format_menu_line(period: Optional[PeriodUsage], label: str, now: Optional[in
         body = f"{period.used_percent}%"
     if period.period_end:
         reset_time = _format_local_minute(period.period_end)
-        return f"{label}: {body}  reset {reset_time} ({_countdown_to(period.period_end, now)})"
+        return f"{label}: {body}  ⟳ {reset_time} ({_countdown_to(period.period_end, now)})"
     return f"{label}: {body}"
 
 

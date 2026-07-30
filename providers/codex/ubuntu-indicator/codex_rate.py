@@ -105,7 +105,7 @@ def format_menu_line(window: Optional[RateWindow], label: str, now: Optional[int
     if window is None:
         return f"{label}: no data"
     reset_time = time.strftime("%Y-%m-%d %H:%M", time.localtime(window.resets_at))
-    return f"{label}: {window.used_percent}%  reset {reset_time} ({_countdown(window.resets_at, now)})"
+    return f"{label}: {window.used_percent}%  ⟳ {reset_time} ({_countdown(window.resets_at, now)})"
 
 
 def format_updated_at(updated_at: str, tz: Optional[tzinfo] = None) -> str:

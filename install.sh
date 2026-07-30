@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
-    echo "Usage: $0 {all|codex|claude|grok|codex-macos}"
+    echo "Usage: $0 {all|codex|claude|grok|gemini|codex-macos}"
 }
 
 install_provider() {
@@ -17,6 +17,9 @@ install_provider() {
             ;;
         grok)
             bash "$ROOT_DIR/providers/grok/ubuntu-indicator/install.sh"
+            ;;
+        gemini)
+            bash "$ROOT_DIR/providers/gemini/ubuntu-indicator/install.sh"
             ;;
         codex-macos)
             bash "$ROOT_DIR/providers/codex/macos-menubar/install.sh"
@@ -31,13 +34,13 @@ install_provider() {
 target="${1:-}"
 case "$target" in
     all)
-        for provider in codex claude grok; do
+        for provider in codex claude grok gemini; do
             echo
             echo "=== Installing $provider ==="
             install_provider "$provider"
         done
         ;;
-    codex|claude|grok|codex-macos)
+    codex|claude|grok|gemini|codex-macos)
         install_provider "$target"
         ;;
     -h|--help)

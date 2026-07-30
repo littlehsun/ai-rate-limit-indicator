@@ -1,8 +1,8 @@
 # Rate Limit Indicator
 
-Codex、Claude Code 與 Grok Build 的 rate-limit indicator monorepo。
+Codex、Claude Code、Grok Build 與 Gemini CLI 的 rate-limit indicator monorepo。
 
-目前這個整合版保留三個 provider 已驗證的資料來源與背景服務，並提供共用安裝、測試入口。三個 GNOME indicator 仍會各自顯示，避免第一階段整併改變既有行為。
+目前這個整合版保留各 provider 的資料來源與背景服務，並提供共用安裝、測試入口。GNOME indicator 仍會各自顯示，避免第一階段整併改變既有行為。
 
 ## Providers
 
@@ -11,6 +11,7 @@ Codex、Claude Code 與 Grok Build 的 rate-limit indicator monorepo。
 | [Codex](providers/codex/README.md) | AppIndicator3 | Swift menu bar | Local Codex rollout files; optional ChatGPT quota API |
 | [Claude](providers/claude/README.md) | AppIndicator3 | — | `~/.claude/rate_limits_live.json` |
 | [Grok](providers/grok/README.md) | AppIndicator3 | — | Grok CLI billing API |
+| [Gemini](providers/gemini/README.md) | AppIndicator3 | — | Gemini CLI OAuth quota API |
 
 ## Install
 
@@ -26,6 +27,7 @@ Or install one provider:
 ./install.sh codex
 ./install.sh claude
 ./install.sh grok
+./install.sh gemini
 ```
 
 Install the Codex macOS menu-bar app:
@@ -51,7 +53,8 @@ The macOS smoke test is skipped automatically when `swiftc` is unavailable.
 ├── providers/
 │   ├── codex/
 │   ├── claude/
-│   └── grok/
+│   ├── grok/
+│   └── gemini/
 ├── docs/
 │   └── architecture.md
 ├── scripts/

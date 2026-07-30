@@ -113,14 +113,18 @@ class GrokRateTests(unittest.TestCase):
             used_cents=178,
             limit_cents=15000,
         )
-        line = format_menu_line(monthly, "Monthly", now=0)
+        now = int(datetime(2026, 7, 30, 12, 0, tzinfo=timezone.utc).timestamp())
+        line = format_menu_line(monthly, "Monthly", now=now)
         self.assertIn("$1.78 / $150", line)
         self.assertIn("(1%)", line)
+        self.assertIn("  ⟳ ", line)
+        self.assertTrue(line.endswith("(1d12h)"))
 
         weekly = PeriodUsage(4, period_end="2026-07-29T00:00:00+00:00")
-        wline = format_menu_line(weekly, "Weekly", now=0)
+        wline = format_menu_line(weekly, "Weekly", now=now)
         self.assertIn("4%", wline)
         self.assertNotIn("$", wline)
+        self.assertIn("  ⟳ ", wline)
 
     def test_read_access_token_prefers_unexpired(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -37,6 +37,14 @@ echo "=== Grok ==="
 )
 
 echo
+echo "=== Gemini ==="
+(
+    cd "$ROOT_DIR/providers/gemini"
+    PYTHONPATH="$PWD/ubuntu-indicator" python3 -m unittest discover -s tests -v
+    bash -n ubuntu-indicator/install.sh
+)
+
+echo
 echo "=== Integration ==="
 bash -n "$ROOT_DIR/install.sh"
 "$ROOT_DIR/install.sh" --help

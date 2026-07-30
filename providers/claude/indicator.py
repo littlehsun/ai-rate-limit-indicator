@@ -8,16 +8,20 @@ import time
 import signal
 import html
 from pathlib import Path
+from typing import Sequence
 
 RATE_LIMITS_FILE = Path.home() / '.claude' / 'rate_limits_live.json'
 ICON_TMPS = ['/tmp/claude-rate-0.svg', '/tmp/claude-rate-1.svg']
 POLL_INTERVAL = 60  # seconds
 
+NEUTRAL_TEXT_COLOR = '#FFFFFF'
 COLORS = {
     'green':  '#00AF50',
     'yellow': '#E6C800',
     'red':    '#FF5555',
 }
+TextSegment = tuple[str, str]
+IconText = str | Sequence[TextSegment]
 CLAUDE_LOGO_PATH = Path(__file__).parent / 'assets' / 'claude-logo.svg'
 
 
@@ -35,12 +39,13 @@ def _load_logo_markup():
 CLAUDE_LOGO_MARKUP = _load_logo_markup()
 
 
-def make_icon_svg(text, color):
+def make_icon_svg(text: IconText, color: str):
     """Generate an SVG icon with the Claude logo and a coloured text label."""
     fill = COLORS.get(color, COLORS['green'])
-    safe = html.escape(text)
+    plain = _plain_text(text)
+    spans = _render_text_spans(text, color)
     # ~7.5px per char + logo(22) + padding(14)
-    width = max(90, int(len(text) * 7.5) + 36)
+    width = max(90, int(len(plain) * 7.5) + 36)
     brand_mark = (
         f'<g transform="translate(1 1) scale(0.833333)">'
         f'{CLAUDE_LOGO_MARKUP}</g>'
@@ -51,8 +56,22 @@ def make_icon_svg(text, color):
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="22">'
         f'{brand_mark}'
         f'<text x="25" y="15" font-family="monospace,DejaVu Sans Mono"'
-        f' font-size="11" fill="{fill}">{safe}</text>'
+        f' font-size="11" xml:space="preserve">{spans}</text>'
         f'</svg>'
+    )
+
+
+def _plain_text(text: IconText) -> str:
+    if isinstance(text, str):
+        return text
+    return ''.join(segment for segment, _ in text)
+
+
+def _render_text_spans(text: IconText, default_color: str) -> str:
+    segments = [(text, default_color)] if isinstance(text, str) else text
+    return ''.join(
+        f'<tspan fill="{COLORS.get(color, color)}">{html.escape(segment)}</tspan>'
+        for segment, color in segments
     )
 
 
@@ -107,12 +126,12 @@ class ClaudeRateIndicator:
         self.update()
         return True
 
-    def _set_icon(self, text, color):
+    def _set_icon(self, text: IconText, color: str):
         # Alternate between two tmp paths to force GNOME Shell to reload the SVG
         self._icon_idx ^= 1
         path = ICON_TMPS[self._icon_idx]
         Path(path).write_text(make_icon_svg(text, color))
-        self.indicator.set_icon_full(path, f'Claude rate limit: {text}')
+        self.indicator.set_icon_full(path, f'Claude rate limit: {_plain_text(text)}')
 
     def update(self):
         data = self._read_data()
@@ -132,17 +151,25 @@ class ClaudeRateIndicator:
 
         now = int(time.time())
         cd5 = self._countdown(reset_5h, now)
+        cd7 = self._countdown(reset_7d, now)
 
-        label = f'{u5h}%|{u7d}% ⟳{cd5}'
         max_pct = max(u5h, u7d)
         color = 'red' if max_pct >= 90 else 'yellow' if max_pct >= 70 else 'green'
-        self._set_icon(label, color)
+        self._set_icon(
+            [
+                (f'{u5h}%', self._color_for_pct(u5h)),
+                ('|', NEUTRAL_TEXT_COLOR),
+                (f'{u7d}%', self._color_for_pct(u7d)),
+                (f'  ⟳{cd5}', NEUTRAL_TEXT_COLOR),
+            ],
+            color,
+        )
 
         t5 = self._fmt_time(reset_5h, '%H:%M')
-        self.item_5h.set_label(f'⚡ 5H: {u5h}%  ⟳ {cd5} ({t5})')
+        self.item_5h.set_label(f'⚡ 5H: {u5h}%  ⟳ {t5} ({cd5})')
 
         t7 = self._fmt_time(reset_7d, '%m/%d %H:%M')
-        self.item_7d.set_label(f'📅 7D: {u7d}%  ⟳ {t7}')
+        self.item_7d.set_label(f'📅 7D: {u7d}%  ⟳ {t7} ({cd7})')
 
         if updated_at:
             self.item_updated.set_label(f'Updated: {self._fmt_time(updated_at, "%H:%M:%S")}')
@@ -171,6 +198,13 @@ class ClaudeRateIndicator:
             return time.strftime(fmt, time.localtime(ts))
         except Exception:
             return '--'
+
+    def _color_for_pct(self, value):
+        if value >= 90:
+            return 'red'
+        if value >= 70:
+            return 'yellow'
+        return 'green'
 
 
 def main():
