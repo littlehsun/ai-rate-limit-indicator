@@ -152,7 +152,7 @@ class CodexRateIndicator:
         self.item_5h.set_sensitive(False)
         self.menu.append(self.item_5h)
 
-        self.item_weekly = Gtk.MenuItem(label="📅 Weekly: --")
+        self.item_weekly = Gtk.MenuItem(label="📅 7D: --")
         self.item_weekly.set_sensitive(False)
         self.menu.append(self.item_weekly)
 
@@ -211,8 +211,7 @@ class CodexRateIndicator:
                 self.item_5h.set_label("⚡ 5H: no data")
             else:
                 self.item_5h.hide()
-            weekly_name = "📅 Weekly" if self.show_five_hour else "📅 7D"
-            self.item_weekly.set_label(f"{weekly_name}: no data")
+            self.item_weekly.set_label("📅 7D: no data")
             self.item_updated.set_label("Updated: --")
             self._hide_optional_wham_items()
             return
@@ -236,8 +235,7 @@ class CodexRateIndicator:
             self.item_5h.set_label(format_menu_line(snapshot.five_hour, "⚡ 5H", now=now))
         else:
             self.item_5h.hide()
-        weekly_name = "📅 Weekly" if self.show_five_hour else "📅 7D"
-        self.item_weekly.set_label(format_menu_line(snapshot.weekly, weekly_name, now=now))
+        self.item_weekly.set_label(format_menu_line(snapshot.weekly, "📅 7D", now=now))
         self.item_updated.set_label(f"Updated: {format_updated_at(snapshot.updated_at)}")
         self._update_optional_wham_items(snapshot)
 

@@ -38,6 +38,51 @@ Install the Codex macOS menu-bar app:
 
 Each provider keeps its own user service, cache, configuration, and authentication files. The repository does not contain or copy local credentials.
 
+## Select indicators at login
+
+The integrated installer creates one GNOME autostart command:
+
+```text
+~/.local/bin/rate-limit-indicators start
+```
+
+It reads:
+
+```text
+~/.config/rate-limit-indicator/providers.env
+```
+
+Choose the providers that should run:
+
+```bash
+CODEX=true
+CLAUDE=true
+GROK=false
+GEMINI=true
+```
+
+Apply changes immediately:
+
+```bash
+~/.local/bin/rate-limit-indicators apply
+```
+
+Other management commands:
+
+```bash
+~/.local/bin/rate-limit-indicators status
+~/.local/bin/rate-limit-indicators stop
+~/.local/bin/rate-limit-indicators start
+```
+
+Install or repair only the unified manager without reinstalling providers:
+
+```bash
+./install.sh manager
+```
+
+The manager disables each provider's individual GNOME autostart entry. Indicator services and polling timers are then started or stopped together according to `providers.env`.
+
 ## Test
 
 ```bash
@@ -59,6 +104,7 @@ The macOS smoke test is skipped automatically when `swiftc` is unavailable.
 │   └── architecture.md
 ├── scripts/
 │   └── test-all.sh
+├── manage.sh
 └── install.sh
 ```
 

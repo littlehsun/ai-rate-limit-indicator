@@ -6,6 +6,7 @@ The first integrated release is deliberately a monorepo rather than a runtime re
 
 - each provider retains its proven parser, polling, cache, and authentication behavior;
 - the root installer provides one entry point;
+- one login manager reads `providers.env` and reconciles all indicator services and poll timers;
 - the root test runner exercises every provider;
 - provider credentials and caches remain outside the repository;
 - standalone repositories remain available while this layout is evaluated.

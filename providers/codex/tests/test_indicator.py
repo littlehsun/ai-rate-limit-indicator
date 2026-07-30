@@ -196,6 +196,7 @@ class IndicatorTests(unittest.TestCase):
         self.assertIn('<tspan fill="#E6C800">89%</tspan>', svg)
         self.assertIn('xml:space="preserve"', svg)
         self.assertIn('<tspan fill="#FFFFFF">  ⟳4h57m</tspan>', svg)
+        self.assertTrue(app.item_weekly.label.startswith("📅 7D:"))
         self.assertFalse(app.item_reset_separator.visible)
 
     def test_update_can_show_only_weekly_window(self):

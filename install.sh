@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
-    echo "Usage: $0 {all|codex|claude|grok|gemini|codex-macos}"
+    echo "Usage: $0 {all|codex|claude|grok|gemini|manager|codex-macos}"
 }
 
 install_provider() {
@@ -39,9 +39,16 @@ case "$target" in
             echo "=== Installing $provider ==="
             install_provider "$provider"
         done
+        bash "$ROOT_DIR/manage.sh" install
         ;;
     codex|claude|grok|gemini|codex-macos)
         install_provider "$target"
+        if [[ "$target" != "codex-macos" ]]; then
+            bash "$ROOT_DIR/manage.sh" install
+        fi
+        ;;
+    manager)
+        bash "$ROOT_DIR/manage.sh" install
         ;;
     -h|--help)
         usage

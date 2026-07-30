@@ -46,6 +46,8 @@ echo "=== Gemini ==="
 
 echo
 echo "=== Integration ==="
+python3 -m unittest discover -s "$ROOT_DIR/tests" -v
 bash -n "$ROOT_DIR/install.sh"
+bash -n "$ROOT_DIR/manage.sh"
 "$ROOT_DIR/install.sh" --help
 echo "All available checks passed."
