@@ -251,7 +251,9 @@ def load_codex() -> ProviderSnapshot:
         )
     extras = []
     if snapshot.reset_credits_available is not None:
-        extras.append(f"Reset credits: R{snapshot.reset_credits_available}")
+        extras.append(f"Reset credits: {snapshot.reset_credits_available}")
+    else:
+        extras.append("Reset credits: --")
     for index, expires_at in enumerate(snapshot.reset_credit_expirations, start=1):
         extras.append(f"{index}. expires {format_wham_timestamp(expires_at)}")
     return ProviderSnapshot(

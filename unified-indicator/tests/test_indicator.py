@@ -13,6 +13,17 @@ class IndicatorTests(unittest.TestCase):
             source.index("self.indicator.set_menu(self.menu)"),
         )
 
+    def test_auto_mode_is_configured_in_settings_not_provider_dropdown(self):
+        dropdown_source = inspect.getsource(
+            indicator.UnifiedRateIndicator._rebuild_menu
+        )
+        settings_source = inspect.getsource(
+            indicator.UnifiedRateIndicator._open_settings
+        )
+
+        self.assertNotIn("Auto (recent 7D:", dropdown_source)
+        self.assertIn("Auto: recent 7D change", settings_source)
+
     def test_unified_icon_uses_selected_brand_and_split_colors(self):
         svg = indicator.make_icon_svg(
             "claude",
@@ -163,14 +174,14 @@ class IndicatorTests(unittest.TestCase):
     def test_reset_credit_extras_become_expandable_group(self):
         label, expirations, remaining = indicator.split_reset_credit_extras(
             (
-                "Reset credits: R2",
+                "Reset credits: 2",
                 "1. expires 2026-08-13 02:12",
                 "2. expires 2026-08-20 02:12",
                 "Other detail",
             )
         )
 
-        self.assertEqual(label, "Reset credits: R2")
+        self.assertEqual(label, "Reset credits: 2")
         self.assertEqual(len(expirations), 2)
         self.assertEqual(remaining, ("Other detail",))
 

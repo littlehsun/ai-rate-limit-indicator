@@ -10,6 +10,7 @@ from wham import (
     format_reset_credit_lines,
     merge_reset_credits,
     parse_usage_response,
+    preserve_cached_reset_credits,
     read_codex_access_token,
     read_wham_snapshot,
     resolve_access_token,
@@ -129,6 +130,40 @@ class WhamTests(unittest.TestCase):
                 "3. expires 2026-07-04 08:00",
             ],
         )
+
+    def test_preserves_cached_reset_credits_when_endpoint_is_unavailable(self):
+        cached = parse_usage_response(
+            {
+                "account_id": "acct_123",
+                "rate_limit": {
+                    "primary_window": {
+                        "used_percent": 1,
+                        "limit_window_seconds": 604800,
+                        "reset_at": 1783411200,
+                    },
+                    "rate_limit_reset_credits": {"available_count": 2},
+                },
+            },
+            updated_at="2026-07-01T00:00:00Z",
+        )
+        snapshot = parse_usage_response(
+            {
+                "account_id": "acct_123",
+                "rate_limit": {
+                    "primary_window": {
+                        "used_percent": 2,
+                        "limit_window_seconds": 604800,
+                        "reset_at": 1783411200,
+                    },
+                },
+            },
+            updated_at="2026-07-01T00:01:00Z",
+        )
+
+        preserved = preserve_cached_reset_credits(snapshot, cached)
+
+        self.assertEqual(preserved.reset_credits_available, 2)
+        self.assertEqual(preserved.updated_at, "2026-07-01T00:01:00Z")
 
     def test_writes_and_reads_wham_cache(self):
         snapshot = parse_usage_response(

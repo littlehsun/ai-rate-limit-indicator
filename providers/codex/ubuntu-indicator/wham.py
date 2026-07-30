@@ -130,6 +130,30 @@ def merge_reset_credits(snapshot: CodexRateSnapshot, payload: Mapping[str, Any])
     )
 
 
+def preserve_cached_reset_credits(
+    snapshot: CodexRateSnapshot,
+    cached: Optional[CodexRateSnapshot],
+) -> CodexRateSnapshot:
+    if (
+        snapshot.reset_credits_available is not None
+        or cached is None
+        or cached.reset_credits_available is None
+        or snapshot.account_id != cached.account_id
+    ):
+        return snapshot
+    return CodexRateSnapshot(
+        updated_at=snapshot.updated_at,
+        five_hour=snapshot.five_hour,
+        weekly=snapshot.weekly,
+        plan_type=snapshot.plan_type,
+        source_path=snapshot.source_path,
+        source_kind=snapshot.source_kind,
+        account_id=snapshot.account_id,
+        reset_credits_available=cached.reset_credits_available,
+        reset_credit_expirations=cached.reset_credit_expirations,
+    )
+
+
 def read_wham_snapshot(path: Path = None) -> Optional[CodexRateSnapshot]:
     cache_path = default_wham_cache_path() if path is None else path
     try:
@@ -184,12 +208,14 @@ def main() -> int:
         return 2
 
     try:
+        cached = read_wham_snapshot(args.cache)
         snapshot = fetch_wham_snapshot(
             access_token=token,
             usage_url=args.usage_url,
             reset_credits_url=args.reset_credits_url,
             timeout=args.timeout,
         )
+        snapshot = preserve_cached_reset_credits(snapshot, cached)
         write_wham_snapshot(snapshot, args.cache)
     except (urllib.error.URLError, OSError, json.JSONDecodeError, RuntimeError) as exc:
         print(f"ChatGPT wham polling failed: {exc}", file=sys.stderr)

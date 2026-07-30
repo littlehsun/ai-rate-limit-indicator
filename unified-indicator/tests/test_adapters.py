@@ -125,8 +125,21 @@ class AdapterTests(unittest.TestCase):
             with patch.dict("os.environ", {"XDG_CACHE_HOME": tmp}):
                 snapshot = load_codex()
 
-        self.assertEqual(snapshot.extras[0], "Reset credits: R1")
+        self.assertEqual(snapshot.extras[0], "Reset credits: 1")
         self.assertIn("1. expires 2026-08-13", snapshot.extras[1])
+
+    def test_codex_adapter_keeps_reset_credit_row_when_api_has_no_data(self):
+        class Snapshot:
+            updated_at = "2026-07-30T08:00:00Z"
+            five_hour = None
+            weekly = None
+            reset_credits_available = None
+            reset_credit_expirations = ()
+
+        with patch("wham.read_wham_snapshot", return_value=Snapshot()):
+            snapshot = load_codex()
+
+        self.assertEqual(snapshot.extras, ("Reset credits: --",))
 
     def test_grok_adapter_labels_weekly_window_as_7d(self):
         class Window:

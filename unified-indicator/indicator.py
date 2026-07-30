@@ -389,14 +389,6 @@ class UnifiedRateIndicator:
         provider_order = provider_display_order(config)
         dropdown_order = dropdown_providers(config)
         selected_ids = {snapshot.provider for snapshot in selected}
-        auto_label = selected[0].label if mode == "auto" and selected else "--"
-        auto_item = Gtk.CheckMenuItem(
-            label=f"Auto (recent 7D: {auto_label})",
-        )
-        auto_item.set_active(mode == "auto")
-        auto_item.connect("toggled", self._toggle_auto_mode)
-        self.menu.append(auto_item)
-        self.menu.append(Gtk.SeparatorMenuItem())
         visible_snapshots = order_dropdown_snapshots(
             self.snapshots,
             provider_order,
@@ -473,19 +465,6 @@ class UnifiedRateIndicator:
     @staticmethod
     def _window_icon(window_id: str) -> str:
         return "📅" if _window_kind(window_id) in {"7d", "monthly"} else "⚡"
-
-    def _toggle_auto_mode(self, item) -> None:
-        mode, providers = display_settings(read_manager_config())
-        if item.get_active():
-            write_display_settings("auto", providers)
-        elif mode == "auto":
-            fallback = (
-                (self.auto_selector.selected_provider,)
-                if self.auto_selector.selected_provider
-                else providers[:1]
-            )
-            write_display_settings("custom", fallback)
-        self.update()
 
     def _toggle_provider(self, item, provider: str) -> None:
         mode, configured = display_settings(read_manager_config())
