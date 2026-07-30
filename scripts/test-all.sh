@@ -53,6 +53,16 @@ echo "=== Unified indicator ==="
 )
 
 echo
+echo "=== Unified macOS UI ==="
+bash -n "$ROOT_DIR/macos/install.sh"
+bash -n "$ROOT_DIR/macos/poll-provider.sh"
+if [[ "$(uname -s)" == "Darwin" ]] && command -v swift >/dev/null 2>&1; then
+    swift test --package-path "$ROOT_DIR/macos"
+else
+    echo "SKIP: unified macOS Swift build (requires macOS with Swift)"
+fi
+
+echo
 echo "=== Integration ==="
 python3 -m unittest discover -s "$ROOT_DIR/tests" -v
 bash -n "$ROOT_DIR/install.sh"

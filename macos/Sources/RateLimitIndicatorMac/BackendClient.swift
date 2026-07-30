@@ -1,0 +1,78 @@
+import Foundation
+
+enum BackendError: LocalizedError {
+    case missingCLI(String)
+    case failed(String)
+    case invalidResponse(String)
+
+    var errorDescription: String? {
+        switch self {
+        case let .missingCLI(path):
+            "Unified backend is missing at \(path). Run the macOS installer again."
+        case let .failed(message):
+            message
+        case let .invalidResponse(message):
+            "Unified backend returned invalid data: \(message)"
+        }
+    }
+}
+
+struct BackendClient {
+    let cliURL: URL
+
+    init(cliURL: URL = BackendPaths.cliURL) {
+        self.cliURL = cliURL
+    }
+
+    func fetchSnapshots() async throws -> [ProviderSnapshot] {
+        let cliURL = self.cliURL
+        return try await Task.detached(priority: .utility) {
+            guard FileManager.default.fileExists(atPath: cliURL.path) else {
+                throw BackendError.missingCLI(cliURL.path)
+            }
+
+            let process = Process()
+            let standardOutput = Pipe()
+            let standardError = Pipe()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = ["python3", cliURL.path, "--json"]
+            process.standardOutput = standardOutput
+            process.standardError = standardError
+
+            do {
+                try process.run()
+            } catch {
+                throw BackendError.failed("Could not start the unified backend: \(error.localizedDescription)")
+            }
+            process.waitUntilExit()
+
+            let output = standardOutput.fileHandleForReading.readDataToEndOfFile()
+            let errorOutput = standardError.fileHandleForReading.readDataToEndOfFile()
+            guard process.terminationStatus == 0 else {
+                let detail = String(data: errorOutput, encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                throw BackendError.failed(
+                    detail?.isEmpty == false ? detail! : "Unified backend exited with status \(process.terminationStatus)"
+                )
+            }
+
+            do {
+                let decoder = JSONDecoder()
+                decoder.keyDecodingStrategy = .convertFromSnakeCase
+                return try decoder.decode(SnapshotPayload.self, from: output).providers
+            } catch {
+                throw BackendError.invalidResponse(error.localizedDescription)
+            }
+        }.value
+    }
+}
+
+enum BackendPaths {
+    static let appSupportURL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Application Support/RateLimitIndicator", isDirectory: true)
+    static let backendURL = appSupportURL.appendingPathComponent("backend", isDirectory: true)
+    static let cliURL = backendURL.appendingPathComponent("cli.py")
+    static let assetsURL = appSupportURL.appendingPathComponent("assets", isDirectory: true)
+    static let configURL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".config/rate-limit-indicator/providers.env")
+}
