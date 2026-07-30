@@ -15,6 +15,8 @@ APP_DIR="$REAL_HOME/.local/share/rate-limit-indicator"
 INSTALLED_SCRIPT="$APP_DIR/manage.sh"
 BIN="$REAL_HOME/.local/bin/rate-limit-indicators"
 AUTOSTART="$REAL_HOME/.config/autostart/rate-limit-indicators.desktop"
+UNIFIED_SERVICE="rate-limit-indicator.service"
+UNIFIED_CLI="$REAL_HOME/.local/share/rate-limit-indicator/unified/cli.py"
 
 PROVIDER_KEYS=(CODEX CLAUDE GROK GEMINI)
 PROVIDER_NAMES=(codex claude grok gemini)
@@ -32,7 +34,7 @@ PROVIDER_TIMERS=(
 )
 
 usage() {
-    echo "Usage: $0 {install|start|apply|stop|status}"
+    echo "Usage: $0 {install|start|apply|stop|status|usage [--json] [--provider NAME]}"
 }
 
 read_enabled() {
@@ -62,20 +64,18 @@ apply_provider() {
     local timer="$4"
 
     if read_enabled "$key"; then
-        echo "Starting $name indicator..."
-        systemctl --user restart "$service" \
-            || echo "Warning: could not start $service (is the provider installed?)." >&2
+        echo "Enabling $name data source..."
         if [[ -n "$timer" ]]; then
             systemctl --user enable --now "$timer" \
                 || echo "Warning: could not enable $timer." >&2
         fi
     else
-        echo "Stopping $name indicator..."
-        systemctl --user stop "$service" 2>/dev/null || true
+        echo "Disabling $name data source..."
         if [[ -n "$timer" ]]; then
             systemctl --user disable --now "$timer" 2>/dev/null || true
         fi
     fi
+    systemctl --user stop "$service" 2>/dev/null || true
 }
 
 apply_config() {
@@ -98,6 +98,24 @@ apply_config() {
             "${PROVIDER_SERVICES[$idx]}" \
             "${PROVIDER_TIMERS[$idx]}"
     done
+    if any_provider_enabled; then
+        echo "Starting unified indicator..."
+        systemctl --user restart "$UNIFIED_SERVICE" \
+            || echo "Warning: could not start $UNIFIED_SERVICE." >&2
+    else
+        echo "No providers enabled; stopping unified indicator."
+        systemctl --user stop "$UNIFIED_SERVICE" 2>/dev/null || true
+    fi
+}
+
+any_provider_enabled() {
+    local key
+    for key in "${PROVIDER_KEYS[@]}"; do
+        if read_enabled "$key"; then
+            return 0
+        fi
+    done
+    return 1
 }
 
 disable_individual_autostarts() {
@@ -125,8 +143,37 @@ install_manager() {
             echo "CLAUDE=true"
             echo "GROK=true"
             echo "GEMINI=true"
+            echo "DISPLAY_MODE=auto"
+            echo "DISPLAY_PROVIDERS=codex,claude,grok,gemini"
+            echo "DROPDOWN_PROVIDERS=codex,claude,grok,gemini"
+            echo "PROVIDER_ORDER=codex,claude,grok,gemini"
         } > "$CONFIG_FILE"
     fi
+    if ! grep -q '^DISPLAY_MODE=' "$CONFIG_FILE"; then
+        legacy_display="$(
+            sed -n -E 's/^DISPLAY_PROVIDER=(codex|claude|grok|gemini)$/\1/p' \
+                "$CONFIG_FILE" | tail -n 1
+        )"
+        if [[ -n "$legacy_display" ]]; then
+            printf 'DISPLAY_MODE=custom\n' >> "$CONFIG_FILE"
+        else
+            printf 'DISPLAY_MODE=auto\n' >> "$CONFIG_FILE"
+        fi
+    fi
+    if ! grep -q '^DISPLAY_PROVIDERS=' "$CONFIG_FILE"; then
+        if [[ -n "${legacy_display:-}" ]]; then
+            printf 'DISPLAY_PROVIDERS=%s\n' "$legacy_display" >> "$CONFIG_FILE"
+        else
+            printf 'DISPLAY_PROVIDERS=codex,claude,grok,gemini\n' >> "$CONFIG_FILE"
+        fi
+    fi
+    if ! grep -q '^DROPDOWN_PROVIDERS=' "$CONFIG_FILE"; then
+        printf 'DROPDOWN_PROVIDERS=codex,claude,grok,gemini\n' >> "$CONFIG_FILE"
+    fi
+    if ! grep -q '^PROVIDER_ORDER=' "$CONFIG_FILE"; then
+        printf 'PROVIDER_ORDER=codex,claude,grok,gemini\n' >> "$CONFIG_FILE"
+    fi
+    sed -i '/^DISPLAY_PROVIDER=/d' "$CONFIG_FILE"
     chmod 600 "$CONFIG_FILE"
 
     if [[ "$SOURCE_SCRIPT" != "$INSTALLED_SCRIPT" ]]; then
@@ -154,6 +201,7 @@ EOF
     for service in "${PROVIDER_SERVICES[@]}"; do
         systemctl --user disable "$service" 2>/dev/null || true
     done
+    systemctl --user disable "$UNIFIED_SERVICE" 2>/dev/null || true
 
     echo "Manager: $BIN"
     echo "Config: $CONFIG_FILE"
@@ -171,19 +219,26 @@ stop_all() {
         [[ -n "$timer" ]] || continue
         systemctl --user stop "$timer" 2>/dev/null || true
     done
+    systemctl --user stop "$UNIFIED_SERVICE" 2>/dev/null || true
 }
 
 show_status() {
     local idx
     local configured
     local active
-    printf '%-8s %-10s %-10s\n' "PROVIDER" "CONFIG" "SERVICE"
+    printf '%-8s %-10s %-10s\n' "PROVIDER" "CONFIG" "COLLECTOR"
     for idx in "${!PROVIDER_KEYS[@]}"; do
         configured=false
         read_enabled "${PROVIDER_KEYS[$idx]}" && configured=true
-        active="$(systemctl --user is-active "${PROVIDER_SERVICES[$idx]}" 2>/dev/null || true)"
+        if [[ -n "${PROVIDER_TIMERS[$idx]}" ]]; then
+            active="$(systemctl --user is-active "${PROVIDER_TIMERS[$idx]}" 2>/dev/null || true)"
+        else
+            active="file"
+        fi
         printf '%-8s %-10s %-10s\n' "${PROVIDER_NAMES[$idx]}" "$configured" "${active:-unknown}"
     done
+    active="$(systemctl --user is-active "$UNIFIED_SERVICE" 2>/dev/null || true)"
+    printf '\nUnified UI: %s\n' "${active:-unknown}"
 }
 
 case "${1:-}" in
@@ -191,6 +246,13 @@ case "${1:-}" in
     start|apply) apply_config ;;
     stop) stop_all ;;
     status) show_status ;;
+    usage)
+        if [[ ! -f "$UNIFIED_CLI" ]]; then
+            echo "Unified CLI is not installed. Run the repository installer first." >&2
+            exit 1
+        fi
+        exec python3 "$UNIFIED_CLI" "${@:2}"
+        ;;
     -h|--help) usage ;;
     *) usage >&2; exit 2 ;;
 esac

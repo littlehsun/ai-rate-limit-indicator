@@ -5,3 +5,12 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 *.svg.tmp
+
+# Local credentials and runtime configuration
+.env
+.env.*
+*.local
+providers.env
+oauth.env
+*.pem
+*.key

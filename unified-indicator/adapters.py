@@ -1,0 +1,413 @@
+from __future__ import annotations
+
+import json
+import os
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Callable, Optional
+
+from models import ProviderSnapshot, UsageWindow, parse_timestamp
+
+
+HERE = Path(__file__).resolve().parent
+COLLECTORS = HERE / "collectors"
+REPO_ROOT = HERE.parent
+
+if COLLECTORS.is_dir():
+    sys.path.append(str(COLLECTORS))
+else:
+    for path in (
+        REPO_ROOT / "providers/codex/ubuntu-indicator",
+        REPO_ROOT / "providers/grok/ubuntu-indicator",
+        REPO_ROOT / "providers/gemini/ubuntu-indicator",
+    ):
+        sys.path.append(str(path))
+
+
+PROVIDER_ORDER = ("codex", "claude", "grok", "gemini")
+PROVIDER_LABELS = {
+    "codex": "Codex",
+    "claude": "Claude",
+    "grok": "Grok",
+    "gemini": "Gemini",
+}
+
+
+def default_manager_config() -> Path:
+    return Path.home() / ".config" / "rate-limit-indicator" / "providers.env"
+
+
+def read_manager_config(path: Optional[Path] = None) -> dict[str, str]:
+    config_path = path or Path(
+        os.environ.get("RATE_LIMIT_INDICATOR_CONFIG", default_manager_config())
+    )
+    values: dict[str, str] = {}
+    try:
+        lines = config_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return values
+    for line in lines:
+        stripped = line.split("#", 1)[0].strip()
+        if "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        values[key.strip().upper()] = value.strip()
+    return values
+
+
+def display_settings(
+    values: Optional[dict[str, str]] = None,
+) -> tuple[str, tuple[str, ...]]:
+    config = values if values is not None else read_manager_config()
+    mode = config.get("DISPLAY_MODE", "").lower()
+    providers = tuple(
+        provider
+        for provider in config.get("DISPLAY_PROVIDERS", "").lower().split(",")
+        if provider in PROVIDER_ORDER
+    )
+    if mode not in {"auto", "custom"}:
+        legacy = config.get("DISPLAY_PROVIDER", "auto").lower()
+        if legacy in PROVIDER_ORDER:
+            mode = "custom"
+            providers = (legacy,)
+        else:
+            mode = "auto"
+    if not providers:
+        providers = tuple(
+            provider
+            for provider in PROVIDER_ORDER
+            if config.get(provider.upper(), "false").lower()
+            in {"1", "true", "yes", "on"}
+        )
+    return mode, providers
+
+
+def dropdown_providers(
+    values: Optional[dict[str, str]] = None,
+) -> tuple[str, ...]:
+    config = values if values is not None else read_manager_config()
+    if "DROPDOWN_PROVIDERS" not in config:
+        return tuple(
+            provider
+            for provider in PROVIDER_ORDER
+            if config.get(provider.upper(), "false").lower()
+            in {"1", "true", "yes", "on"}
+        )
+    return tuple(
+        provider
+        for provider in config["DROPDOWN_PROVIDERS"].lower().split(",")
+        if provider in PROVIDER_ORDER
+    )
+
+
+def provider_display_order(
+    values: Optional[dict[str, str]] = None,
+) -> tuple[str, ...]:
+    config = values if values is not None else read_manager_config()
+    configured = [
+        provider
+        for provider in config.get("PROVIDER_ORDER", "").lower().split(",")
+        if provider in PROVIDER_ORDER
+    ]
+    fallbacks = [
+        *display_settings(config)[1],
+        *dropdown_providers(config),
+        *PROVIDER_ORDER,
+    ]
+    for provider in fallbacks:
+        if provider not in configured:
+            configured.append(provider)
+    return tuple(configured)
+
+
+def write_display_settings(
+    mode: str,
+    providers: tuple[str, ...],
+    path: Optional[Path] = None,
+    dropdown: Optional[tuple[str, ...]] = None,
+    provider_order: Optional[tuple[str, ...]] = None,
+) -> Path:
+    config_path = path or Path(
+        os.environ.get("RATE_LIMIT_INDICATOR_CONFIG", default_manager_config())
+    )
+    updates = {
+        "DISPLAY_MODE": "auto" if mode == "auto" else "custom",
+        "DISPLAY_PROVIDERS": ",".join(
+            provider for provider in providers if provider in PROVIDER_ORDER
+        ),
+    }
+    if dropdown is not None:
+        updates["DROPDOWN_PROVIDERS"] = ",".join(
+            provider for provider in dropdown if provider in PROVIDER_ORDER
+        )
+    if provider_order is not None:
+        updates["PROVIDER_ORDER"] = ",".join(
+            provider for provider in provider_order if provider in PROVIDER_ORDER
+        )
+    try:
+        lines = config_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = []
+    written: set[str] = set()
+    output = []
+    for line in lines:
+        stripped = line.split("#", 1)[0].strip()
+        key = stripped.split("=", 1)[0].strip().upper() if "=" in stripped else ""
+        if key not in updates:
+            output.append(line)
+            continue
+        if key not in written:
+            output.append(f"{key}={updates[key]}")
+            written.add(key)
+    for key, value in updates.items():
+        if key not in written:
+            output.append(f"{key}={value}")
+    config_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    config_path.parent.chmod(0o700)
+    tmp_path = config_path.with_name(f".{config_path.name}.tmp")
+    try:
+        tmp_path.write_text("\n".join(output) + "\n", encoding="utf-8")
+        tmp_path.chmod(0o600)
+        os.replace(tmp_path, config_path)
+        config_path.chmod(0o600)
+    finally:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+    return config_path
+
+
+def enabled_providers(path: Optional[Path] = None) -> tuple[str, ...]:
+    values = read_manager_config(path)
+    enabled = []
+    for provider in PROVIDER_ORDER:
+        value = values.get(provider.upper(), "false").lower()
+        if value in {"1", "true", "yes", "on"}:
+            enabled.append(provider)
+    return tuple(enabled)
+
+
+def load_snapshots(
+    providers: Optional[tuple[str, ...]] = None,
+) -> tuple[ProviderSnapshot, ...]:
+    selected = providers if providers is not None else enabled_providers()
+    loaders: dict[str, Callable[[], ProviderSnapshot]] = {
+        "codex": load_codex,
+        "claude": load_claude,
+        "grok": load_grok,
+        "gemini": load_gemini,
+    }
+    snapshots = []
+    for provider in PROVIDER_ORDER:
+        if provider not in selected:
+            continue
+        try:
+            snapshots.append(loaders[provider]())
+        except Exception as exc:
+            snapshots.append(
+                ProviderSnapshot(
+                    provider=provider,
+                    label=PROVIDER_LABELS[provider],
+                    updated_at=None,
+                    windows=(),
+                    status="error",
+                    error=str(exc),
+                )
+            )
+    return tuple(snapshots)
+
+
+def load_codex() -> ProviderSnapshot:
+    from codex_rate import default_codex_home, find_latest_snapshot
+    from wham import default_wham_cache_path, format_wham_timestamp, read_wham_snapshot
+
+    snapshot = read_wham_snapshot(Path(default_wham_cache_path()))
+    if snapshot is None:
+        snapshot = find_latest_snapshot(
+            Path(os.environ.get("CODEX_HOME", default_codex_home()))
+        )
+    if snapshot is None:
+        return _no_data("codex")
+
+    windows = []
+    if snapshot.five_hour:
+        windows.append(
+            UsageWindow(
+                id="5h",
+                label="5H",
+                used_percent=snapshot.five_hour.used_percent,
+                resets_at=snapshot.five_hour.resets_at,
+            )
+        )
+    if snapshot.weekly:
+        windows.append(
+            UsageWindow(
+                id="7d",
+                label="7D",
+                used_percent=snapshot.weekly.used_percent,
+                resets_at=snapshot.weekly.resets_at,
+            )
+        )
+    extras = []
+    if snapshot.reset_credits_available is not None:
+        extras.append(f"Reset credits: R{snapshot.reset_credits_available}")
+    for index, expires_at in enumerate(snapshot.reset_credit_expirations, start=1):
+        extras.append(f"{index}. expires {format_wham_timestamp(expires_at)}")
+    return ProviderSnapshot(
+        provider="codex",
+        label="Codex",
+        updated_at=snapshot.updated_at,
+        windows=tuple(windows),
+        status=_freshness(snapshot.updated_at),
+        extras=tuple(extras),
+    )
+
+
+def load_claude() -> ProviderSnapshot:
+    path = Path(
+        os.environ.get(
+            "CLAUDE_RATE_LIMITS_FILE", Path.home() / ".claude/rate_limits_live.json"
+        )
+    )
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return _no_data("claude")
+    windows = (
+        UsageWindow(
+            id="5h",
+            label="5H",
+            used_percent=_pct(payload.get("utilization_5h")),
+            resets_at=_integer(payload.get("reset_5h")),
+        ),
+        UsageWindow(
+            id="7d",
+            label="7D",
+            used_percent=_pct(payload.get("utilization_7d")),
+            resets_at=_integer(payload.get("reset_7d")),
+        ),
+    )
+    updated_at = _iso_from_epoch(_integer(payload.get("updated_at")))
+    return ProviderSnapshot(
+        "claude", "Claude", updated_at, windows, status=_freshness(updated_at)
+    )
+
+
+def load_grok() -> ProviderSnapshot:
+    from grok_rate import default_cache_path, format_usd_cents, read_cache
+
+    snapshot = read_cache(Path(os.environ.get("GROK_RATE_CACHE", default_cache_path())))
+    if snapshot is None:
+        return _no_data("grok")
+    windows = []
+    if snapshot.weekly:
+        windows.append(
+            UsageWindow(
+                id="weekly",
+                label="7D",
+                used_percent=snapshot.weekly.used_percent,
+                resets_at=parse_timestamp(snapshot.weekly.period_end),
+            )
+        )
+    if snapshot.monthly:
+        detail = None
+        if (
+            snapshot.monthly.used_cents is not None
+            and snapshot.monthly.limit_cents is not None
+        ):
+            detail = (
+                f"{format_usd_cents(snapshot.monthly.used_cents)} / "
+                f"{format_usd_cents(snapshot.monthly.limit_cents)}"
+            )
+        windows.append(
+            UsageWindow(
+                id="monthly",
+                label="Monthly",
+                used_percent=snapshot.monthly.used_percent,
+                resets_at=parse_timestamp(snapshot.monthly.period_end),
+                detail=detail,
+            )
+        )
+    extras = tuple(
+        f"{name}: {'--' if pct is None else f'{pct}%'}"
+        for name, pct in snapshot.product_usage
+    )
+    return ProviderSnapshot(
+        "grok",
+        "Grok",
+        snapshot.updated_at,
+        tuple(windows),
+        status=_freshness(snapshot.updated_at),
+        extras=extras,
+    )
+
+
+def load_gemini() -> ProviderSnapshot:
+    from agy_rate import fetch_quota_snapshot, read_cache, write_cache
+
+    try:
+        agy_snapshot = fetch_quota_snapshot()
+        write_cache(agy_snapshot)
+    except RuntimeError:
+        agy_snapshot = read_cache()
+
+    if agy_snapshot is None:
+        return _no_data("gemini")
+
+    windows = tuple(
+        UsageWindow(
+            id=(
+                window.cadence
+                if window.group_id == "gemini"
+                else f"{window.group_id}-{window.cadence}"
+            ),
+            label=f"{window.group_label} {window.cadence.upper()}",
+            used_percent=window.used_percent,
+            resets_at=parse_timestamp(window.reset_at),
+        )
+        for window in agy_snapshot.windows
+    )
+    return ProviderSnapshot(
+        "gemini",
+        "Gemini",
+        agy_snapshot.updated_at,
+        windows,
+        status=_freshness(agy_snapshot.updated_at),
+    )
+
+
+def _no_data(provider: str) -> ProviderSnapshot:
+    return ProviderSnapshot(
+        provider=provider,
+        label=PROVIDER_LABELS[provider],
+        updated_at=None,
+        windows=(),
+        status="no_data",
+    )
+
+
+def _pct(value: object) -> int:
+    return max(0, min(100, _integer(value) or 0))
+
+
+def _integer(value: object) -> Optional[int]:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _iso_from_epoch(value: Optional[int]) -> Optional[str]:
+    if not value:
+        return None
+    return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
+
+
+def _freshness(updated_at: Optional[str], max_age_seconds: int = 600) -> str:
+    updated_ts = parse_timestamp(updated_at)
+    if updated_ts is None:
+        return "stale"
+    return "stale" if int(time.time()) - updated_ts > max_age_seconds else "fresh"

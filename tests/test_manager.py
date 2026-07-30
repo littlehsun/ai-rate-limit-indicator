@@ -33,7 +33,7 @@ class ManagerTests(unittest.TestCase):
         )
         return env, log
 
-    def test_apply_starts_enabled_and_stops_disabled_providers(self):
+    def test_apply_manages_collectors_and_starts_one_unified_ui(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             env, log = self._environment(root)
@@ -47,10 +47,11 @@ class ManagerTests(unittest.TestCase):
             subprocess.run([MANAGER, "apply"], env=env, check=True, capture_output=True, text=True)
             commands = log.read_text(encoding="utf-8")
 
-        self.assertIn("--user restart codex-rate-indicator.service", commands)
+        self.assertIn("--user stop codex-rate-indicator.service", commands)
         self.assertIn("--user stop claude-rate-indicator.service", commands)
-        self.assertIn("--user restart grok-rate-indicator.service", commands)
+        self.assertIn("--user stop grok-rate-indicator.service", commands)
         self.assertIn("--user stop gemini-rate-indicator.service", commands)
+        self.assertIn("--user restart rate-limit-indicator.service", commands)
         self.assertIn("--user enable --now codex-rate-wham-poll.timer", commands)
         self.assertIn("--user disable --now gemini-rate-poll.timer", commands)
 
@@ -73,6 +74,20 @@ class ManagerTests(unittest.TestCase):
 
             self.assertTrue(config.is_file())
             self.assertIn("GEMINI=true", config.read_text(encoding="utf-8"))
+            self.assertIn("DISPLAY_MODE=auto", config.read_text(encoding="utf-8"))
+            self.assertIn(
+                "DISPLAY_PROVIDERS=codex,claude,grok,gemini",
+                config.read_text(encoding="utf-8"),
+            )
+            self.assertIn(
+                "DROPDOWN_PROVIDERS=codex,claude,grok,gemini",
+                config.read_text(encoding="utf-8"),
+            )
+            self.assertIn(
+                "PROVIDER_ORDER=codex,claude,grok,gemini",
+                config.read_text(encoding="utf-8"),
+            )
+            self.assertNotIn("DISPLAY_PROVIDER=", config.read_text(encoding="utf-8"))
             self.assertIn(f"Exec={launcher} start", unified.read_text(encoding="utf-8"))
             self.assertIn(
                 "X-GNOME-Autostart-enabled=false",

@@ -135,7 +135,7 @@ class GrokRateIndicator:
 
         self.menu = Gtk.Menu()
 
-        self.item_weekly = Gtk.MenuItem(label="⚡ Weekly: --")
+        self.item_weekly = Gtk.MenuItem(label="📅 7D: --")
         self.item_weekly.set_sensitive(False)
         self.menu.append(self.item_weekly)
 
@@ -188,7 +188,7 @@ class GrokRateIndicator:
         snapshot = read_cache(self.cache_path)
         if snapshot is None:
             self._set_icon("Grok --", "green")
-            self.item_weekly.set_label("⚡ Weekly: no data")
+            self.item_weekly.set_label("📅 7D: no data")
             self.item_monthly.set_label("📅 Monthly: no data")
             self.item_on_demand.hide()
             for item in self.product_items:
@@ -200,7 +200,7 @@ class GrokRateIndicator:
         color = self._color_for_pct(snapshot.max_used_percent)
         self._set_icon(self._indicator_text_segments(snapshot), color, description=label)
 
-        self.item_weekly.set_label(format_menu_line(snapshot.weekly, "⚡ Weekly"))
+        self.item_weekly.set_label(format_menu_line(snapshot.weekly, "📅 7D"))
         self.item_monthly.set_label(format_menu_line(snapshot.monthly, "📅 Monthly"))
 
         on_demand = format_on_demand_line(snapshot)

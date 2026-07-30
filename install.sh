@@ -39,15 +39,18 @@ case "$target" in
             echo "=== Installing $provider ==="
             install_provider "$provider"
         done
+        bash "$ROOT_DIR/unified-indicator/install.sh"
         bash "$ROOT_DIR/manage.sh" install
         ;;
     codex|claude|grok|gemini|codex-macos)
         install_provider "$target"
         if [[ "$target" != "codex-macos" ]]; then
+            bash "$ROOT_DIR/unified-indicator/install.sh"
             bash "$ROOT_DIR/manage.sh" install
         fi
         ;;
     manager)
+        bash "$ROOT_DIR/unified-indicator/install.sh"
         bash "$ROOT_DIR/manage.sh" install
         ;;
     -h|--help)

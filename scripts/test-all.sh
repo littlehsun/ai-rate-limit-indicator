@@ -45,6 +45,14 @@ echo "=== Gemini ==="
 )
 
 echo
+echo "=== Unified indicator ==="
+(
+    cd "$ROOT_DIR/unified-indicator"
+    PYTHONPATH="$PWD" python3 -m unittest discover -s tests -v
+    bash -n install.sh
+)
+
+echo
 echo "=== Integration ==="
 python3 -m unittest discover -s "$ROOT_DIR/tests" -v
 bash -n "$ROOT_DIR/install.sh"
