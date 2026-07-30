@@ -202,11 +202,3 @@ automatically when `swiftc` is unavailable.
 ├── manage.sh
 └── install.sh
 ```
-
-## Imported revisions
-
-- Codex: `a4f5a0b64377cc9c278a29c15f29722013e606e8`
-- Claude: `98b8b48c07b782cde134f67b5cf07c1a6f931c4f`
-- Grok: `89fc8c0b20b6c2ef8c3d25b57542a3eabacedb46`
-
-The original standalone repositories remain intact.
