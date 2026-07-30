@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -17,6 +18,11 @@ from adapters import (
     write_display_settings,
 )
 from agy_rate import AgyQuotaSnapshot, AgyQuotaWindow
+from claude_oauth import (
+    ClaudeOAuthSnapshot,
+    ClaudeOAuthUnavailable,
+    ClaudeOAuthWindow,
+)
 
 
 class AdapterTests(unittest.TestCase):
@@ -32,27 +38,34 @@ class AdapterTests(unittest.TestCase):
                 ("codex", "grok", "gemini"),
             )
 
-    def test_claude_adapter_normalizes_windows(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            source = Path(tmp) / "claude.json"
-            source.write_text(
-                json.dumps(
-                    {
-                        "utilization_5h": 30,
-                        "reset_5h": 2_000,
-                        "utilization_7d": 99,
-                        "reset_7d": 3_000,
-                        "updated_at": 1_500,
-                    }
-                ),
-                encoding="utf-8",
-            )
-            with patch.dict("os.environ", {"CLAUDE_RATE_LIMITS_FILE": str(source)}):
-                snapshot = load_claude()
+    def test_claude_adapter_returns_no_data_without_oauth(self):
+        with patch(
+            "claude_oauth.fetch_oauth_snapshot",
+            side_effect=ClaudeOAuthUnavailable("no credentials"),
+        ):
+            snapshot = load_claude()
+
         self.assertEqual(snapshot.provider, "claude")
+        self.assertEqual(snapshot.windows, ())
+        self.assertEqual(snapshot.status, "no_data")
+
+    def test_claude_adapter_prefers_oauth_usage(self):
+        oauth_snapshot = ClaudeOAuthSnapshot(
+            updated_at=datetime.now(timezone.utc).isoformat(),
+            windows=(
+                ClaudeOAuthWindow("5h", 17, "2026-07-30T11:00:00Z"),
+                ClaudeOAuthWindow("7d", 39, "2026-08-05T00:00:00Z"),
+            ),
+        )
+        with patch(
+            "claude_oauth.fetch_oauth_snapshot",
+            return_value=oauth_snapshot,
+        ):
+            snapshot = load_claude()
+
         self.assertEqual([window.id for window in snapshot.windows], ["5h", "7d"])
-        self.assertEqual([window.used_percent for window in snapshot.windows], [30, 99])
-        self.assertEqual(snapshot.status, "stale")
+        self.assertEqual([window.used_percent for window in snapshot.windows], [17, 39])
+        self.assertEqual(snapshot.status, "fresh")
 
     def test_display_settings_roundtrip_preserves_provider_order(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -27,7 +27,7 @@ details.
 | Provider | Unified GNOME UI | macOS | Data source |
 | --- | --- | --- | --- |
 | [Codex](providers/codex/README.md) | Adapter | Swift menu bar | Local Codex rollout data; optional ChatGPT quota API |
-| [Claude](providers/claude/README.md) | Adapter | — | Local Claude rate-limit snapshot |
+| [Claude](providers/claude/README.md) | Adapter | — | Claude OAuth usage API |
 | [Grok](providers/grok/README.md) | Adapter | — | Grok CLI billing API, with 7D and monthly windows |
 | [Gemini](providers/gemini/README.md) | Adapter | — | AGY localhost quota API with last-known snapshot cache |
 
@@ -163,6 +163,11 @@ user's home directory with restrictive permissions.
 
 The AGY adapter connects only to fixed loopback addresses. TLS verification is
 relaxed exclusively for AGY's self-signed localhost certificate.
+
+Claude OAuth credentials are read from Claude Code's existing
+`~/.claude/.credentials.json`. The indicator never stores or refreshes the
+access token itself. Without valid OAuth credentials, Claude usage is reported
+as unavailable.
 
 ## Testing
 

@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -267,32 +265,28 @@ def load_codex() -> ProviderSnapshot:
 
 
 def load_claude() -> ProviderSnapshot:
-    path = Path(
-        os.environ.get(
-            "CLAUDE_RATE_LIMITS_FILE", Path.home() / ".claude/rate_limits_live.json"
-        )
-    )
+    from claude_oauth import ClaudeOAuthUnavailable, fetch_oauth_snapshot
+
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        oauth_snapshot = fetch_oauth_snapshot()
+    except ClaudeOAuthUnavailable:
         return _no_data("claude")
-    windows = (
+
+    windows = tuple(
         UsageWindow(
-            id="5h",
-            label="5H",
-            used_percent=_pct(payload.get("utilization_5h")),
-            resets_at=_integer(payload.get("reset_5h")),
-        ),
-        UsageWindow(
-            id="7d",
-            label="7D",
-            used_percent=_pct(payload.get("utilization_7d")),
-            resets_at=_integer(payload.get("reset_7d")),
-        ),
+            id=window.id,
+            label=window.id.upper(),
+            used_percent=window.used_percent,
+            resets_at=parse_timestamp(window.resets_at),
+        )
+        for window in oauth_snapshot.windows
     )
-    updated_at = _iso_from_epoch(_integer(payload.get("updated_at")))
     return ProviderSnapshot(
-        "claude", "Claude", updated_at, windows, status=_freshness(updated_at)
+        "claude",
+        "Claude",
+        oauth_snapshot.updated_at,
+        windows,
+        status=_freshness(oauth_snapshot.updated_at),
     )
 
 
@@ -387,23 +381,6 @@ def _no_data(provider: str) -> ProviderSnapshot:
         windows=(),
         status="no_data",
     )
-
-
-def _pct(value: object) -> int:
-    return max(0, min(100, _integer(value) or 0))
-
-
-def _integer(value: object) -> Optional[int]:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _iso_from_epoch(value: Optional[int]) -> Optional[str]:
-    if not value:
-        return None
-    return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
 
 
 def _freshness(updated_at: Optional[str], max_age_seconds: int = 600) -> str:

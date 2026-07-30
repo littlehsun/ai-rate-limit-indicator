@@ -25,7 +25,7 @@ snapshot，再由單一 GNOME AppIndicator 顯示 5H、7D、reset 倒數與詳�
 | Provider | 資料來源 |
 | --- | --- |
 | Codex | 本機 Codex rollout 資料；可選用 ChatGPT quota API |
-| Claude | 本機 Claude rate-limit snapshot |
+| Claude | Claude OAuth usage API |
 | Grok | Grok CLI billing API，顯示 7D 與 Monthly |
 | Gemini | AGY localhost quota API；暫時無法使用時保留最後一份 AGY snapshot |
 
@@ -122,6 +122,10 @@ Collector 只會讀取各 CLI 原本的本機認證位置；產生的設定與 c
 
 AGY adapter 只會連線至 loopback address。因為 AGY 使用 localhost
 self-signed certificate，TLS 驗證只會針對固定的本機 endpoint 放寬。
+
+Claude OAuth credential 會直接讀取 Claude Code 現有的
+`~/.claude/.credentials.json`；indicator 不會自行保存或更新 access token。
+若沒有有效的 OAuth credential，Claude usage 會顯示為 unavailable。
 
 ## 測試
 

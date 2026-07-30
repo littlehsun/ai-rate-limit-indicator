@@ -25,6 +25,7 @@ mkdir -p "$APP_DIR/assets" "$COLLECTOR_DIR" "$REAL_HOME/.local/bin" "$SERVICE_DI
 cp "$SCRIPT_DIR/models.py" "$APP_DIR/models.py"
 cp "$SCRIPT_DIR/adapters.py" "$APP_DIR/adapters.py"
 cp "$SCRIPT_DIR/agy_rate.py" "$APP_DIR/agy_rate.py"
+cp "$SCRIPT_DIR/claude_oauth.py" "$APP_DIR/claude_oauth.py"
 cp "$SCRIPT_DIR/cli.py" "$APP_DIR/cli.py"
 cp "$SCRIPT_DIR/indicator.py" "$APP_DIR/indicator.py"
 cp "$SCRIPT_DIR/assets/"* "$APP_DIR/assets/"
