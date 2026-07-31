@@ -171,6 +171,34 @@ class IndicatorTests(unittest.TestCase):
         self.assertEqual(indicator.UnifiedRateIndicator._window_icon("weekly"), "📅")
         self.assertEqual(indicator.UnifiedRateIndicator._window_icon("monthly"), "📅")
 
+    def test_grok_indicator_countdown_uses_weekly_reset(self):
+        weekly = UsageWindow("weekly", "7D", 1, resets_at=100)
+        monthly = UsageWindow("monthly", "Monthly", 31, resets_at=200)
+        snapshot = ProviderSnapshot(
+            "grok",
+            "Grok",
+            "2026-07-31T07:20:00Z",
+            (weekly, monthly),
+        )
+
+        selected = indicator.indicator_reset_window(snapshot.windows)
+
+        self.assertEqual(selected, weekly)
+
+    def test_indicator_countdown_prefers_five_hour_over_weekly(self):
+        five_hour = UsageWindow("5h", "5H", 1, resets_at=100)
+        weekly = UsageWindow("7d", "7D", 31, resets_at=200)
+        snapshot = ProviderSnapshot(
+            "codex",
+            "Codex",
+            "2026-07-31T07:20:00Z",
+            (five_hour, weekly),
+        )
+
+        selected = indicator.indicator_reset_window(snapshot.windows)
+
+        self.assertEqual(selected, five_hour)
+
     def test_reset_credit_extras_become_expandable_group(self):
         label, expirations, remaining = indicator.split_reset_credit_extras(
             (

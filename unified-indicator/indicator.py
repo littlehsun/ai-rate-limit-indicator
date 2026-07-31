@@ -106,6 +106,14 @@ def seven_day_percent(snapshot: ProviderSnapshot) -> Optional[int]:
     return max(windows) if windows else None
 
 
+def indicator_reset_window(windows: tuple[UsageWindow, ...]) -> UsageWindow:
+    cadence_order = {"5h": 0, "7d": 1, "monthly": 2}
+    return min(
+        windows,
+        key=lambda window: cadence_order.get(_window_kind(window.id), 99),
+    )
+
+
 def split_reset_credit_extras(
     extras: tuple[str, ...],
 ) -> tuple[Optional[str], tuple[str, ...], tuple[str, ...]]:
@@ -377,7 +385,7 @@ class UnifiedRateIndicator:
             segments.append(
                 (f"{window.used_percent}%", self._color(window.used_percent))
             )
-        constrained = max(windows, key=lambda item: item.used_percent)
+        constrained = indicator_reset_window(windows)
         segments.append((f"  ⟳{countdown(constrained.resets_at)}", NEUTRAL_TEXT_COLOR))
         return segments
 
