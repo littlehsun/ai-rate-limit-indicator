@@ -95,6 +95,38 @@ class GrokRateTests(unittest.TestCase):
         assert weekly is not None
         self.assertEqual(weekly.used_percent, 0)
 
+    def test_missing_percent_at_start_of_week_is_zero(self):
+        payload = {
+            "config": {
+                "currentPeriod": {
+                    "type": "USAGE_PERIOD_TYPE_WEEKLY",
+                    "start": "2026-07-31T07:13:41.975176+00:00",
+                    "end": "2026-08-07T07:13:41.975176+00:00",
+                },
+                "billingPeriodStart": "2026-07-31T07:13:41.975176+00:00",
+                "billingPeriodEnd": "2026-08-07T07:13:41.975176+00:00",
+            }
+        }
+
+        weekly, _ = parse_credits_payload(payload)
+
+        self.assertIsNotNone(weekly)
+        assert weekly is not None
+        self.assertEqual(weekly.used_percent, 0)
+        self.assertEqual(weekly.period_end, "2026-08-07T07:13:41.975176+00:00")
+
+    def test_missing_percent_without_weekly_period_remains_no_data(self):
+        weekly, _ = parse_credits_payload(
+            {
+                "config": {
+                    "billingPeriodStart": "2026-07-01T00:00:00+00:00",
+                    "billingPeriodEnd": "2026-08-01T00:00:00+00:00",
+                }
+            }
+        )
+
+        self.assertIsNone(weekly)
+
     def test_format_indicator_weekly_monthly(self):
         snap = merge_snapshots(
             weekly=PeriodUsage(4, "2026-07-22T00:00:00+00:00", "2026-07-25T12:00:00+00:00"),

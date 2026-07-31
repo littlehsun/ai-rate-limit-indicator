@@ -204,12 +204,13 @@ def parse_credits_payload(payload: dict[str, Any]) -> tuple[Optional[PeriodUsage
 
     percent = _percent_val(config.get("creditUsagePercent"))
     start = end = None
+    period_type = ""
     current = config.get("currentPeriod")
     if isinstance(current, dict):
-        ptype = str(current.get("type") or "")
+        period_type = str(current.get("type") or "")
         start = current.get("start") if isinstance(current.get("start"), str) else None
         end = current.get("end") if isinstance(current.get("end"), str) else None
-        meta["period_type"] = ptype
+        meta["period_type"] = period_type
     if start is None and isinstance(config.get("billingPeriodStart"), str):
         start = config.get("billingPeriodStart")
     if end is None and isinstance(config.get("billingPeriodEnd"), str):
@@ -237,6 +238,16 @@ def parse_credits_payload(payload: dict[str, Any]) -> tuple[Optional[PeriodUsage
             if name == "GrokBuild" and p is not None:
                 percent = p
                 break
+
+    # The credits endpoint omits usage fields at the beginning of a new weekly
+    # period. A declared weekly period still represents a valid zero-usage
+    # window, not missing data.
+    if (
+        percent is None
+        and "WEEKLY" in period_type.upper()
+        and (start is not None or end is not None)
+    ):
+        percent = 0
 
     if percent is None:
         return None, meta
