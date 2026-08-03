@@ -81,6 +81,21 @@ strip_unquoted_comment() {
     printf '%s' "$output" | sed -E 's/[[:space:]]+$//'
 }
 
+expand_supported_path_variables() {
+    local value="$1"
+    case "$value" in
+        '~') value="$HOME" ;;
+        '~/'*) value="$HOME/${value:2}" ;;
+    esac
+    value="${value//\$\{HOME\}/$HOME}"
+    value="${value//\$HOME/$HOME}"
+    if [[ -n "${XDG_CACHE_HOME:-}" ]]; then
+        value="${value//\$\{XDG_CACHE_HOME\}/$XDG_CACHE_HOME}"
+        value="${value//\$XDG_CACHE_HOME/$XDG_CACHE_HOME}"
+    fi
+    printf '%s' "$value"
+}
+
 load_wham_environment() {
     [[ -f "$WHAM_ENV" ]] || return 0
     local line
@@ -105,6 +120,11 @@ load_wham_environment() {
         value="$(strip_unquoted_comment "$value")"
         case "$value" in
             \"*\"|\'*\') value="${value:1:${#value}-2}" ;;
+        esac
+        case "$key" in
+            CODEX_AUTH_FILE|XDG_CACHE_HOME|CODEX_RATE_WHAM_CACHE)
+                value="$(expand_supported_path_variables "$value")"
+                ;;
         esac
         export "$key=$value"
     done < "$WHAM_ENV"

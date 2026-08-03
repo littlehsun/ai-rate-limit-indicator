@@ -23,19 +23,24 @@ class UnifiedMacOSTests(unittest.TestCase):
             )
             fake_python.write_text(
                 '#!/usr/bin/env bash\n'
-                'printf "%s\\n%s" "${CHATGPT_ACCESS_TOKEN:-}" '
-                '"${CHATGPT_WHAM_USAGE_URL:-}" > "$MARKER"\n',
+                'printf "%s\\n%s\\n%s\\n%s" "${CHATGPT_ACCESS_TOKEN:-}" '
+                '"${CHATGPT_WHAM_USAGE_URL:-}" "${CODEX_AUTH_FILE:-}" '
+                '"${CODEX_RATE_WHAM_CACHE:-}" > "$MARKER"\n',
                 encoding="utf-8",
             )
             wham_env.write_text(
                 "export CHATGPT_ACCESS_TOKEN=test-token # personal account\n"
-                'CHATGPT_WHAM_USAGE_URL="https://example.test/#usage" # endpoint\n',
+                'CHATGPT_WHAM_USAGE_URL="https://example.test/#usage" # endpoint\n'
+                'CODEX_AUTH_FILE="$HOME/custom-auth.json"\n'
+                'XDG_CACHE_HOME="${HOME}/cache-root"\n'
+                'CODEX_RATE_WHAM_CACHE="${XDG_CACHE_HOME}/wham.json"\n',
                 encoding="utf-8",
             )
             fake_python.chmod(0o700)
             environment = os.environ.copy()
             environment.update(
                 {
+                    "HOME": str(temp_dir),
                     "MARKER": str(marker),
                     "RATE_LIMIT_INDICATOR_CONFIG": str(config),
                     "RATE_LIMIT_INDICATOR_PYTHON": str(fake_python),
@@ -69,7 +74,14 @@ class UnifiedMacOSTests(unittest.TestCase):
             self.assertTrue(marker.exists())
             self.assertEqual(
                 marker.read_text(encoding="utf-8"),
-                "test-token\nhttps://example.test/#usage",
+                "\n".join(
+                    (
+                        "test-token",
+                        "https://example.test/#usage",
+                        str(temp_dir / "custom-auth.json"),
+                        str(temp_dir / "cache-root/wham.json"),
+                    )
+                ),
             )
 
     def test_provider_pollers_accept_quoted_enabled_flags(self):
