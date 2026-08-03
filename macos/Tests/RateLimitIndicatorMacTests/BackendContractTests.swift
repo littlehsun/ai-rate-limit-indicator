@@ -131,6 +131,17 @@ final class BackendContractTests: XCTestCase {
         XCTAssertEqual(configuration.enabledProviderOrder, ["grok"])
     }
 
+    func testMissingConfigurationHasNoEnabledProviders() {
+        let missing = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+
+        let configuration = ConfigurationStore.load(from: missing)
+
+        XCTAssertTrue(configuration.enabledProviders.isEmpty)
+        XCTAssertTrue(configuration.indicatorProviders.isEmpty)
+        XCTAssertTrue(configuration.dropdownProviders.isEmpty)
+    }
+
     func testExistingConfigReadErrorsAreNotTreatedAsEmpty() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

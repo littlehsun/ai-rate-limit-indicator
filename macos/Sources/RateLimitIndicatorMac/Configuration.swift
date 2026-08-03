@@ -22,6 +22,14 @@ struct DisplayConfiguration: Equatable {
         providerOrder: ProviderCatalog.order
     )
 
+    static let noEnabledProviders = DisplayConfiguration(
+        mode: .auto,
+        enabledProviders: [],
+        indicatorProviders: [],
+        dropdownProviders: [],
+        providerOrder: ProviderCatalog.order
+    )
+
     func ordered(_ providers: [String]) -> [String] {
         let selected = Set(providers)
         return providerOrder.filter(selected.contains)
@@ -35,7 +43,7 @@ struct DisplayConfiguration: Equatable {
 enum ConfigurationStore {
     static func load(from url: URL = BackendPaths.configURL) -> DisplayConfiguration {
         guard let contents = try? String(contentsOf: url, encoding: .utf8) else {
-            return .defaults
+            return .noEnabledProviders
         }
         var values: [String: String] = [:]
         for line in contents.components(separatedBy: .newlines) {

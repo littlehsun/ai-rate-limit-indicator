@@ -117,6 +117,7 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn("reloadConfiguration()", app_model)
         self.assertIn("try existingContents(at: url)", configuration)
         self.assertNotIn("let existing = (try?", configuration)
+        self.assertIn("return .noEnabledProviders", configuration)
 
     def test_menu_panel_has_intrinsic_content_and_recoverable_empty_state(self):
         views = (
