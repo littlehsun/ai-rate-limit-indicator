@@ -136,10 +136,10 @@ CODEX_RATE_SHOW_5H=false
 EOF
     chmod 600 "$WHAM_ENV"
 fi
-if ! grep -Eq '^[[:space:]]*CODEX_RATE_SOURCE[[:space:]]*=' "$WHAM_ENV"; then
+if ! grep -Eq '^[[:space:]]*(export[[:space:]]+)?CODEX_RATE_SOURCE[[:space:]]*=' "$WHAM_ENV"; then
     printf '\nCODEX_RATE_SOURCE=local\n' >> "$WHAM_ENV"
 fi
-if ! grep -Eq '^[[:space:]]*CODEX_RATE_SHOW_5H[[:space:]]*=' "$WHAM_ENV"; then
+if ! grep -Eq '^[[:space:]]*(export[[:space:]]+)?CODEX_RATE_SHOW_5H[[:space:]]*=' "$WHAM_ENV"; then
     printf 'CODEX_RATE_SHOW_5H=false\n' >> "$WHAM_ENV"
 fi
 chmod 600 "$WHAM_ENV"

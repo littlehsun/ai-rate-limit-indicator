@@ -16,6 +16,14 @@ class ManagerTests(unittest.TestCase):
 
         self.assertIn("CODEX_RATE_SOURCE=local", installer)
         self.assertNotIn("CODEX_RATE_SOURCE=auto", installer)
+        self.assertIn(
+            "(export[[:space:]]+)?CODEX_RATE_SOURCE[[:space:]]*=",
+            installer,
+        )
+        self.assertIn(
+            "(export[[:space:]]+)?CODEX_RATE_SHOW_5H[[:space:]]*=",
+            installer,
+        )
 
     def _environment(self, root: Path) -> tuple[dict[str, str], Path]:
         fake_bin = root / "bin"
