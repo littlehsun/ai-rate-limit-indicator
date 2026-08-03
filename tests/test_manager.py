@@ -194,7 +194,11 @@ class ManagerTests(unittest.TestCase):
             config.parent.mkdir(parents=True)
             config.write_text(
                 "CODEX=true\nexport CODEX_RATE_SOURCE = auto\n"
-                "CLAUDE=false\nGROK=false\nGEMINI=false\n",
+                "CLAUDE=false\nGROK=false\nGEMINI=false\n"
+                "export DISPLAY_MODE=custom\n"
+                "export DISPLAY_PROVIDERS=codex,grok\n"
+                "export DROPDOWN_PROVIDERS=grok\n"
+                "export PROVIDER_ORDER=grok,codex,claude,gemini\n",
                 encoding="utf-8",
             )
 
@@ -209,6 +213,13 @@ class ManagerTests(unittest.TestCase):
             contents = config.read_text(encoding="utf-8")
             self.assertIn("export CODEX_RATE_SOURCE = auto", contents)
             self.assertEqual(contents.count("CODEX_RATE_SOURCE"), 1)
+            for key in (
+                "DISPLAY_MODE",
+                "DISPLAY_PROVIDERS",
+                "DROPDOWN_PROVIDERS",
+                "PROVIDER_ORDER",
+            ):
+                self.assertEqual(contents.count(key), 1)
 
 
 if __name__ == "__main__":

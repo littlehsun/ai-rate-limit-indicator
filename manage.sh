@@ -65,6 +65,11 @@ read_config_value() {
     printf '%s' "$value"
 }
 
+has_config_assignment() {
+    local key="$1"
+    grep -Eq "^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=" "$CONFIG_FILE"
+}
+
 timer_enabled_for_provider() {
     local key="$1"
     if [[ "$key" != "CODEX" ]]; then
@@ -186,35 +191,37 @@ install_manager() {
             echo "PROVIDER_ORDER=codex,claude,grok,gemini"
         } > "$CONFIG_FILE"
     fi
-    if ! grep -Eq '^[[:space:]]*(export[[:space:]]+)?CODEX_RATE_SOURCE[[:space:]]*=' "$CONFIG_FILE"; then
+    if ! has_config_assignment CODEX_RATE_SOURCE; then
         printf '\n# local (default), auto, or wham; auto/wham opt in to network polling.\n' >> "$CONFIG_FILE"
         printf 'CODEX_RATE_SOURCE=%s\n' "$legacy_codex_source" >> "$CONFIG_FILE"
     fi
-    if ! grep -q '^DISPLAY_MODE=' "$CONFIG_FILE"; then
-        legacy_display="$(
-            sed -n -E 's/^DISPLAY_PROVIDER=(codex|claude|grok|gemini)$/\1/p' \
-                "$CONFIG_FILE" | tail -n 1
-        )"
+    if ! has_config_assignment DISPLAY_MODE; then
+        legacy_display="$(read_config_value DISPLAY_PROVIDER)"
+        case "$legacy_display" in
+            codex|claude|grok|gemini) ;;
+            *) legacy_display="" ;;
+        esac
         if [[ -n "$legacy_display" ]]; then
             printf 'DISPLAY_MODE=custom\n' >> "$CONFIG_FILE"
         else
             printf 'DISPLAY_MODE=auto\n' >> "$CONFIG_FILE"
         fi
     fi
-    if ! grep -q '^DISPLAY_PROVIDERS=' "$CONFIG_FILE"; then
+    if ! has_config_assignment DISPLAY_PROVIDERS; then
         if [[ -n "${legacy_display:-}" ]]; then
             printf 'DISPLAY_PROVIDERS=%s\n' "$legacy_display" >> "$CONFIG_FILE"
         else
             printf 'DISPLAY_PROVIDERS=codex,claude,grok,gemini\n' >> "$CONFIG_FILE"
         fi
     fi
-    if ! grep -q '^DROPDOWN_PROVIDERS=' "$CONFIG_FILE"; then
+    if ! has_config_assignment DROPDOWN_PROVIDERS; then
         printf 'DROPDOWN_PROVIDERS=codex,claude,grok,gemini\n' >> "$CONFIG_FILE"
     fi
-    if ! grep -q '^PROVIDER_ORDER=' "$CONFIG_FILE"; then
+    if ! has_config_assignment PROVIDER_ORDER; then
         printf 'PROVIDER_ORDER=codex,claude,grok,gemini\n' >> "$CONFIG_FILE"
     fi
-    sed -i.bak '/^DISPLAY_PROVIDER=/d' "$CONFIG_FILE"
+    sed -E -i.bak '/^[[:space:]]*(export[[:space:]]+)?DISPLAY_PROVIDER[[:space:]]*=/d' \
+        "$CONFIG_FILE"
     rm -f -- "$CONFIG_FILE.bak"
     chmod 600 "$CONFIG_FILE"
 
