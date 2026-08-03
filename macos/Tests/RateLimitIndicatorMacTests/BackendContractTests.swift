@@ -93,6 +93,26 @@ final class BackendContractTests: XCTestCase {
         XCTAssertEqual(configuration.enabledProviderOrder, ["grok"])
     }
 
+    @MainActor
+    func testConfigurationCanReloadAfterExternalProviderFlagEdit() {
+        let initial = DisplayConfiguration.defaults
+        var reloaded = initial
+        reloaded.enabledProviders = ["grok"]
+        reloaded.indicatorProviders = ["grok"]
+        reloaded.dropdownProviders = ["grok"]
+        let model = AppModel(
+            configuration: initial,
+            loadConfiguration: { reloaded },
+            saveConfiguration: { _ in },
+            startsRefreshLoop: false
+        )
+
+        model.reloadConfiguration()
+
+        XCTAssertEqual(model.configuration.enabledProviders, ["grok"])
+        XCTAssertEqual(model.configuration.indicatorProviders, ["grok"])
+    }
+
     func testIndicatorResetUsesShortestQuotaWindow() {
         let fiveHour = UsageWindow(
             id: "5h",

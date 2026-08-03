@@ -1,3 +1,4 @@
+import Foundation
 import ServiceManagement
 
 enum LaunchAtLoginManager {
@@ -26,6 +27,18 @@ enum LaunchAtLoginManager {
             @unknown default:
                 try service.unregister()
             }
+        }
+    }
+
+    static func migrateLegacyIfNeeded(
+        markerURL: URL = BackendPaths.legacyLoginMigrationMarkerURL
+    ) {
+        guard FileManager.default.fileExists(atPath: markerURL.path) else { return }
+        do {
+            try setEnabled(true)
+            try FileManager.default.removeItem(at: markerURL)
+        } catch {
+            // Keep the marker so the migration is retried on the next launch.
         }
     }
 }

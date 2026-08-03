@@ -82,6 +82,8 @@ enum BackendPaths {
     static let backendURL = appSupportURL.appendingPathComponent("backend", isDirectory: true)
     static let cliURL = backendURL.appendingPathComponent("cli.py")
     static let assetsURL = appSupportURL.appendingPathComponent("assets", isDirectory: true)
+    static let legacyLoginMigrationMarkerURL = appSupportURL
+        .appendingPathComponent("migrate-legacy-launch-at-login")
     static var configURL: URL {
         resolveConfigURL(
             environment: ProcessInfo.processInfo.environment,

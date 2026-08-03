@@ -56,6 +56,8 @@ class UnifiedMacOSTests(unittest.TestCase):
             '"$config_file_created" == true || "$CONFIG_FILE" == "$DEFAULT_CONFIG_FILE"',
             mac_installer,
         )
+        self.assertIn("legacy_login_was_enabled=true", mac_installer)
+        self.assertIn("migrate-legacy-launch-at-login", mac_installer)
 
     def test_refresh_failure_marks_retained_snapshots_stale(self):
         app_model = (
@@ -83,6 +85,7 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn("configuration = previous", app_model)
         self.assertIn("model.configurationErrorMessage", views)
         self.assertIn("model.configuration.enabledProviderOrder", views)
+        self.assertIn("reloadConfiguration()", app_model)
 
     def test_menu_panel_has_intrinsic_content_and_recoverable_empty_state(self):
         views = (

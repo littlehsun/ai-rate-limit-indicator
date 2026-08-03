@@ -11,12 +11,16 @@ final class AppModel: ObservableObject {
     @Published var configuration: DisplayConfiguration
 
     private let backend: BackendClient
+    private let loadConfiguration: () -> DisplayConfiguration
     private let saveConfiguration: (DisplayConfiguration) throws -> Void
     private let autoSelector = AutoDisplaySelector()
 
     init(
         backend: BackendClient = BackendClient(),
         configuration: DisplayConfiguration = ConfigurationStore.load(),
+        loadConfiguration: @escaping () -> DisplayConfiguration = {
+            ConfigurationStore.load()
+        },
         saveConfiguration: @escaping (DisplayConfiguration) throws -> Void = {
             try ConfigurationStore.save($0)
         },
@@ -24,6 +28,7 @@ final class AppModel: ObservableObject {
     ) {
         self.backend = backend
         self.configuration = configuration
+        self.loadConfiguration = loadConfiguration
         self.saveConfiguration = saveConfiguration
         if startsRefreshLoop {
             Task { [weak self] in
@@ -46,8 +51,8 @@ final class AppModel: ObservableObject {
         defer { isRefreshing = false }
         do {
             snapshots = try await backend.fetchSnapshots()
+            reloadConfiguration()
             errorMessage = nil
-            resolveIndicatorSnapshots()
         } catch {
             snapshots = snapshots.map { $0.markingStale() }
             errorMessage = error.localizedDescription
@@ -64,6 +69,11 @@ final class AppModel: ObservableObject {
 
     func selectProviderFromDropdown(_ provider: String) {
         toggleIndicator(provider)
+    }
+
+    func reloadConfiguration() {
+        configuration = loadConfiguration()
+        resolveIndicatorSnapshots()
     }
 
     func setMode(_ mode: DisplayMode) {

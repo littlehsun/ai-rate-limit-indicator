@@ -4,6 +4,10 @@ import SwiftUI
 struct RateLimitIndicatorMacApp: App {
     @StateObject private var model = AppModel()
 
+    init() {
+        LaunchAtLoginManager.migrateLegacyIfNeeded()
+    }
+
     var body: some Scene {
         MenuBarExtra {
             MenuContentView(model: model)

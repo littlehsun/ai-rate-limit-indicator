@@ -14,6 +14,7 @@ CONFIG_FILE="${RATE_LIMIT_INDICATOR_CONFIG:-$DEFAULT_CONFIG_FILE}"
 LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
 LOG_DIR="$HOME/Library/Logs/RateLimitIndicator"
 LEGACY_CODEX_PLIST="$LAUNCH_AGENTS/com.hsun.codex-rate-menubar.plist"
+LEGACY_LOGIN_MIGRATION_MARKER="$APP_SUPPORT/migrate-legacy-launch-at-login"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
     echo "The macOS installer must run on macOS." >&2
@@ -37,12 +38,20 @@ CONFIG_DIR="$(dirname "$CONFIG_FILE")"
 
 echo "=== Unified Rate Limit Indicator for macOS ==="
 echo "Removing the legacy Codex menu-bar LaunchAgent..."
+legacy_login_was_enabled=false
+if launchctl print "gui/$UID/com.hsun.codex-rate-menubar" >/dev/null 2>&1; then
+    legacy_login_was_enabled=true
+fi
 launchctl bootout "gui/$UID/com.hsun.codex-rate-menubar" 2>/dev/null || true
 launchctl bootout "gui/$UID" "$LEGACY_CODEX_PLIST" 2>/dev/null || true
 rm -f "$LEGACY_CODEX_PLIST"
 
 echo "[1/5] Installing the shared provider backend..."
 mkdir -p "$BACKEND_DIR" "$COLLECTOR_DIR" "$ASSET_DIR"
+if [[ "$legacy_login_was_enabled" == true ]]; then
+    touch "$LEGACY_LOGIN_MIGRATION_MARKER"
+    chmod 600 "$LEGACY_LOGIN_MIGRATION_MARKER"
+fi
 cp "$ROOT_DIR/unified-indicator/models.py" "$BACKEND_DIR/models.py"
 cp "$ROOT_DIR/unified-indicator/adapters.py" "$BACKEND_DIR/adapters.py"
 cp "$ROOT_DIR/unified-indicator/agy_rate.py" "$BACKEND_DIR/agy_rate.py"
