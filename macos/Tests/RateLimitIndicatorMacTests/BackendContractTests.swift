@@ -279,6 +279,41 @@ final class BackendContractTests: XCTestCase {
         XCTAssertLessThanOrEqual(snapshot.indicatorDisplayWindows.count, 2)
     }
 
+    func testResetWindowAlwaysComesFromDisplayedWindows() {
+        let hiddenFiveHour = UsageWindow(
+            id: "claude-gpt-5h",
+            label: "Claude/GPT 5H",
+            usedPercent: 8,
+            resetsAt: 100,
+            detail: nil
+        )
+        let snapshot = snapshot(
+            provider: "gemini",
+            windows: [
+                UsageWindow(
+                    id: "7d",
+                    label: "Gemini 7D",
+                    usedPercent: 12,
+                    resetsAt: 200,
+                    detail: nil
+                ),
+                hiddenFiveHour,
+                UsageWindow(
+                    id: "claude-gpt-7d",
+                    label: "Claude/GPT 7D",
+                    usedPercent: 47,
+                    resetsAt: 300,
+                    detail: nil
+                ),
+            ]
+        )
+
+        XCTAssertFalse(snapshot.indicatorDisplayWindows.contains(hiddenFiveHour))
+        XCTAssertTrue(snapshot.indicatorDisplayWindows.contains {
+            $0 == snapshot.indicatorResetWindow
+        })
+    }
+
     func testLoginApprovalErrorExplainsRecovery() {
         XCTAssertTrue(
             LaunchAtLoginError.approvalRequired.localizedDescription

@@ -42,7 +42,7 @@ struct ProviderSnapshot: Codable, Identifiable, Hashable {
     }
 
     var indicatorResetWindow: UsageWindow? {
-        windows.prefix(2).min {
+        indicatorDisplayWindows.min {
             $0.quotaCadenceRank < $1.quotaCadenceRank
         }
     }
