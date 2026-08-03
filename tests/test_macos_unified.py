@@ -16,12 +16,17 @@ class UnifiedMacOSTests(unittest.TestCase):
             config = temp_dir / "providers.env"
             marker = temp_dir / "python-ran"
             fake_python = temp_dir / "python3"
+            wham_env = temp_dir / "wham.env"
             config.write_text(
                 "CODEX=true\nCODEX_RATE_SOURCE=local\n",
                 encoding="utf-8",
             )
             fake_python.write_text(
-                '#!/usr/bin/env bash\ntouch "$MARKER"\n',
+                '#!/usr/bin/env bash\nprintf "%s" "${CHATGPT_ACCESS_TOKEN:-}" > "$MARKER"\n',
+                encoding="utf-8",
+            )
+            wham_env.write_text(
+                "CHATGPT_ACCESS_TOKEN=test-token\n",
                 encoding="utf-8",
             )
             fake_python.chmod(0o700)
@@ -32,6 +37,7 @@ class UnifiedMacOSTests(unittest.TestCase):
                     "RATE_LIMIT_INDICATOR_CONFIG": str(config),
                     "RATE_LIMIT_INDICATOR_PYTHON": str(fake_python),
                     "RATE_LIMIT_INDICATOR_APP_SUPPORT": str(temp_dir),
+                    "CODEX_RATE_WHAM_ENV": str(wham_env),
                 }
             )
 
@@ -58,6 +64,7 @@ class UnifiedMacOSTests(unittest.TestCase):
             )
             self.assertEqual(opted_in_result.returncode, 0, opted_in_result.stderr)
             self.assertTrue(marker.exists())
+            self.assertEqual(marker.read_text(encoding="utf-8"), "test-token")
 
     def test_native_ui_consumes_shared_normalized_cli(self):
         backend = (
