@@ -75,16 +75,16 @@ fi
 if [[ -z "$CODEX_HOME_OVERRIDE" ]]; then
     CODEX_HOME_OVERRIDE="$(read_existing_plist_value "$EXISTING_INFO_PLIST" RateLimitIndicatorCodexHome)"
 fi
+if [[ -z "$CODEX_WHAM_CACHE_OVERRIDE" ]]; then
+    CODEX_WHAM_CACHE_OVERRIDE="$(read_existing_plist_value \
+        "$EXISTING_INFO_PLIST" RateLimitIndicatorCodexWhamCache)"
+fi
 if [[ -z "$CODEX_WHAM_CACHE_OVERRIDE" && -f "$LEGACY_CODEX_ENV" ]]; then
     CODEX_WHAM_CACHE_OVERRIDE="$(
         env -u CODEX_RATE_WHAM_CACHE -u XDG_CACHE_HOME \
             CODEX_RATE_WHAM_ENV="$LEGACY_CODEX_ENV" \
             "$SCRIPT_DIR/poll-provider.sh" resolve-codex-cache
     )"
-fi
-if [[ -z "$CODEX_WHAM_CACHE_OVERRIDE" ]]; then
-    CODEX_WHAM_CACHE_OVERRIDE="$(read_existing_plist_value \
-        "$EXISTING_INFO_PLIST" RateLimitIndicatorCodexWhamCache)"
 fi
 if [[ -z "$CLAUDE_CONFIG_DIR_OVERRIDE" ]]; then
     CLAUDE_CONFIG_DIR_OVERRIDE="$(read_existing_plist_value "$EXISTING_INFO_PLIST" RateLimitIndicatorClaudeConfigDir)"

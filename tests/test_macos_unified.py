@@ -247,6 +247,12 @@ class UnifiedMacOSTests(unittest.TestCase):
             'CODEX_HOME_OVERRIDE="$(read_existing_plist_value "$EXISTING_INFO_PLIST" RateLimitIndicatorCodexHome)"',
             mac_installer,
         )
+        self.assertLess(
+            mac_installer.index(
+                '"$EXISTING_INFO_PLIST" RateLimitIndicatorCodexWhamCache'
+            ),
+            mac_installer.index('"$SCRIPT_DIR/poll-provider.sh" resolve-codex-cache'),
+        )
         self.assertIn(
             '"$EXISTING_GROK_PLIST" EnvironmentVariables.GROK_RATE_BILLING_URL',
             mac_installer,
