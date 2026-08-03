@@ -159,7 +159,10 @@ class ManagerTests(unittest.TestCase):
             env, _ = self._environment(root)
             legacy = root / ".config/codex-rate-indicator/wham.env"
             legacy.parent.mkdir(parents=True)
-            legacy.write_text('CODEX_RATE_SOURCE="wham"\n', encoding="utf-8")
+            legacy.write_text(
+                'export CODEX_RATE_SOURCE="wham"\n',
+                encoding="utf-8",
+            )
 
             subprocess.run(
                 [MANAGER, "install"],

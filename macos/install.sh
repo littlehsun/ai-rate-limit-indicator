@@ -116,7 +116,7 @@ config_file_created=false
 legacy_codex_source=""
 if [[ -f "$LEGACY_CODEX_ENV" ]]; then
     legacy_codex_source="$(
-        sed -n -E 's/^[[:space:]]*CODEX_RATE_SOURCE[[:space:]]*=[[:space:]]*([^#[:space:]]+).*$/\1/p' \
+        sed -n -E 's/^[[:space:]]*(export[[:space:]]+)?CODEX_RATE_SOURCE[[:space:]]*=[[:space:]]*([^#[:space:]]+).*$/\2/p' \
             "$LEGACY_CODEX_ENV" | tail -n 1
     )"
 fi

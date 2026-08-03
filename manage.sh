@@ -54,7 +54,7 @@ read_config_value() {
     local value
     [[ -f "$file" ]] || return 0
     value="$(
-        sed -n -E "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*([^#[:space:]]+).*$/\\1/p" \
+        sed -n -E "s/^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=[[:space:]]*([^#[:space:]]+).*$/\\2/p" \
             "$file" 2>/dev/null | tail -n 1 | tr '[:upper:]' '[:lower:]'
     )"
     if [[ ${#value} -ge 2 ]]; then
