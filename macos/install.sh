@@ -254,7 +254,7 @@ for provider in codex grok; do
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>$APP_SUPPORT/poll-provider.sh</string>
+    <string>poll-provider-placeholder</string>
     <string>$provider</string>
   </array>
   <key>RunAtLoad</key>
@@ -262,12 +262,17 @@ for provider in codex grok; do
   <key>StartInterval</key>
   <integer>60</integer>
   <key>StandardOutPath</key>
-  <string>$LOG_DIR/$provider-poll.out.log</string>
+  <string>stdout-placeholder</string>
   <key>StandardErrorPath</key>
-  <string>$LOG_DIR/$provider-poll.err.log</string>
+  <string>stderr-placeholder</string>
 </dict>
 </plist>
 PLIST
+    /usr/bin/plutil -replace ProgramArguments.1 -string "$APP_SUPPORT/poll-provider.sh" "$plist"
+    /usr/bin/plutil -replace StandardOutPath \
+        -string "$LOG_DIR/$provider-poll.out.log" "$plist"
+    /usr/bin/plutil -replace StandardErrorPath \
+        -string "$LOG_DIR/$provider-poll.err.log" "$plist"
     /usr/bin/plutil -insert EnvironmentVariables -dictionary "$plist"
     /usr/bin/plutil -insert EnvironmentVariables.RATE_LIMIT_INDICATOR_CONFIG \
         -string "$CONFIG_FILE" "$plist"
