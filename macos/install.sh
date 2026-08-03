@@ -9,7 +9,8 @@ COLLECTOR_DIR="$BACKEND_DIR/collectors"
 ASSET_DIR="$APP_SUPPORT/assets"
 APP_DIR="${RATE_LIMIT_INDICATOR_APP_DIR:-$HOME/Applications/Rate Limit Indicator.app}"
 APP_EXECUTABLE="$APP_DIR/Contents/MacOS/RateLimitIndicatorMac"
-CONFIG_FILE="${RATE_LIMIT_INDICATOR_CONFIG:-$HOME/.config/rate-limit-indicator/providers.env}"
+DEFAULT_CONFIG_FILE="$HOME/.config/rate-limit-indicator/providers.env"
+CONFIG_FILE="${RATE_LIMIT_INDICATOR_CONFIG:-$DEFAULT_CONFIG_FILE}"
 CONFIG_DIR="$(dirname "$CONFIG_FILE")"
 LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
 LOG_DIR="$HOME/Library/Logs/RateLimitIndicator"
@@ -55,8 +56,15 @@ cp "$ROOT_DIR/unified-indicator/assets/grok-logo.png" "$ASSET_DIR/grok-logo.png"
 cp "$ROOT_DIR/unified-indicator/assets/gemini-logo.svg" "$ASSET_DIR/gemini-logo.svg"
 
 echo "[2/5] Creating the shared display configuration..."
-mkdir -p "$CONFIG_DIR"
-chmod 700 "$CONFIG_DIR"
+config_dir_created=false
+if [[ ! -d "$CONFIG_DIR" ]]; then
+    mkdir -p "$CONFIG_DIR"
+    config_dir_created=true
+fi
+if [[ "$config_dir_created" == true && "$CONFIG_FILE" == "$DEFAULT_CONFIG_FILE" ]]; then
+    chmod 700 "$CONFIG_DIR"
+fi
+config_file_created=false
 if [[ ! -e "$CONFIG_FILE" ]]; then
     {
         echo "CODEX=true"
@@ -68,8 +76,11 @@ if [[ ! -e "$CONFIG_FILE" ]]; then
         echo "DROPDOWN_PROVIDERS=codex,claude,grok,gemini"
         echo "PROVIDER_ORDER=codex,claude,grok,gemini"
     } > "$CONFIG_FILE"
+    config_file_created=true
 fi
-chmod 600 "$CONFIG_FILE"
+if [[ "$config_file_created" == true || "$CONFIG_FILE" == "$DEFAULT_CONFIG_FILE" ]]; then
+    chmod 600 "$CONFIG_FILE"
+fi
 
 echo "[3/5] Building the native SwiftUI app..."
 swift build --package-path "$SCRIPT_DIR" -c release --product RateLimitIndicatorMac

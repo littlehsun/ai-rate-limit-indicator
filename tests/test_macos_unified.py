@@ -46,6 +46,15 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn('rm -f "$LEGACY_CODEX_PLIST"', mac_installer)
         self.assertIn("RateLimitIndicatorConfigPath", mac_installer)
         self.assertIn("EnvironmentVariables.RATE_LIMIT_INDICATOR_CONFIG", mac_installer)
+        self.assertIn('config_dir_created=false', mac_installer)
+        self.assertIn(
+            '"$config_dir_created" == true && "$CONFIG_FILE" == "$DEFAULT_CONFIG_FILE"',
+            mac_installer,
+        )
+        self.assertIn(
+            '"$config_file_created" == true || "$CONFIG_FILE" == "$DEFAULT_CONFIG_FILE"',
+            mac_installer,
+        )
 
     def test_refresh_failure_marks_retained_snapshots_stale(self):
         app_model = (
