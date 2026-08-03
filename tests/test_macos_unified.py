@@ -237,6 +237,7 @@ class UnifiedMacOSTests(unittest.TestCase):
             mac_installer,
         )
         self.assertIn("legacy_login_was_enabled=true", mac_installer)
+        self.assertIn('[[ -f "$LEGACY_CODEX_PLIST" ]]', mac_installer)
         self.assertIn("migrate-legacy-launch-at-login", mac_installer)
         self.assertIn("STAGED_APP_EXECUTABLE", mac_installer)
         self.assertIn('ps -U "$UID" -ww -o pid=', mac_installer)

@@ -118,7 +118,8 @@ fi
 
 echo "=== Unified Rate Limit Indicator for macOS ==="
 legacy_login_was_enabled=false
-if launchctl print "gui/$UID/com.hsun.codex-rate-menubar" >/dev/null 2>&1; then
+if [[ -f "$LEGACY_CODEX_PLIST" ]] \
+    || launchctl print "gui/$UID/com.hsun.codex-rate-menubar" >/dev/null 2>&1; then
     legacy_login_was_enabled=true
 fi
 
