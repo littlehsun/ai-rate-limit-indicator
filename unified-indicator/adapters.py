@@ -222,8 +222,11 @@ def load_codex() -> ProviderSnapshot:
     from codex_rate import default_codex_home, find_latest_snapshot
     from wham import default_wham_cache_path, format_wham_timestamp, read_wham_snapshot
 
-    snapshot = read_wham_snapshot(Path(default_wham_cache_path()))
-    if snapshot is None:
+    source = read_manager_config().get("CODEX_RATE_SOURCE", "local").lower()
+    snapshot = None
+    if source in {"auto", "wham"}:
+        snapshot = read_wham_snapshot(Path(default_wham_cache_path()))
+    if snapshot is None and source != "wham":
         snapshot = find_latest_snapshot(
             Path(os.environ.get("CODEX_HOME", default_codex_home()))
         )

@@ -1,3 +1,6 @@
+import os
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -7,6 +10,55 @@ MACOS = ROOT / "macos"
 
 
 class UnifiedMacOSTests(unittest.TestCase):
+    def test_codex_poller_requires_network_source_opt_in(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_dir = Path(tmp)
+            config = temp_dir / "providers.env"
+            marker = temp_dir / "python-ran"
+            fake_python = temp_dir / "python3"
+            config.write_text(
+                "CODEX=true\nCODEX_RATE_SOURCE=local\n",
+                encoding="utf-8",
+            )
+            fake_python.write_text(
+                '#!/usr/bin/env bash\ntouch "$MARKER"\n',
+                encoding="utf-8",
+            )
+            fake_python.chmod(0o700)
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "MARKER": str(marker),
+                    "RATE_LIMIT_INDICATOR_CONFIG": str(config),
+                    "RATE_LIMIT_INDICATOR_PYTHON": str(fake_python),
+                    "RATE_LIMIT_INDICATOR_APP_SUPPORT": str(temp_dir),
+                }
+            )
+
+            local_result = subprocess.run(
+                ["bash", str(MACOS / "poll-provider.sh"), "codex"],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertEqual(local_result.returncode, 0, local_result.stderr)
+            self.assertFalse(marker.exists())
+
+            config.write_text(
+                "CODEX=true\nCODEX_RATE_SOURCE=auto\n",
+                encoding="utf-8",
+            )
+            opted_in_result = subprocess.run(
+                ["bash", str(MACOS / "poll-provider.sh"), "codex"],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertEqual(opted_in_result.returncode, 0, opted_in_result.stderr)
+            self.assertTrue(marker.exists())
+
     def test_native_ui_consumes_shared_normalized_cli(self):
         backend = (
             MACOS / "Sources/RateLimitIndicatorMac/BackendClient.swift"
@@ -59,6 +111,7 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn("RateLimitIndicatorPythonPath", mac_installer)
         self.assertIn("EnvironmentVariables.RATE_LIMIT_INDICATOR_CONFIG", mac_installer)
         self.assertIn("EnvironmentVariables.RATE_LIMIT_INDICATOR_PYTHON", mac_installer)
+        self.assertIn("CODEX_RATE_SOURCE=local", mac_installer)
         self.assertIn("os.path.realpath(os.path.expanduser(sys.argv[1]))", mac_installer)
         self.assertIn('config_dir_created=false', mac_installer)
         self.assertIn(

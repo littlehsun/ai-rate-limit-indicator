@@ -25,9 +25,19 @@ is_enabled() {
     esac
 }
 
+config_value() {
+    local key="$1"
+    sed -n -E "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*([^#[:space:]]+).*$/\\1/p" \
+        "$CONFIG_FILE" 2>/dev/null | tail -n 1 | tr '[:upper:]' '[:lower:]'
+}
+
 case "$provider" in
     codex)
         is_enabled CODEX || exit 0
+        case "$(config_value CODEX_RATE_SOURCE)" in
+            auto|wham) ;;
+            *) exit 0 ;;
+        esac
         exec "$PYTHON_BIN" "$APP_SUPPORT/backend/collectors/wham.py" --once
         ;;
     grok)

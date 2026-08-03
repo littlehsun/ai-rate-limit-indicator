@@ -109,6 +109,10 @@ CLAUDE=true
 GROK=true
 GEMINI=true
 
+# Codex source: local makes no network requests. auto/wham explicitly opt in
+# to polling undocumented ChatGPT quota endpoints with the existing Codex token.
+CODEX_RATE_SOURCE=local
+
 # auto or custom
 DISPLAY_MODE=custom
 

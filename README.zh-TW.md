@@ -89,6 +89,10 @@ CLAUDE=true
 GROK=true
 GEMINI=true
 
+# Codex 資料來源：local 不會發出網路請求；auto/wham 代表明確同意使用
+# 現有 Codex token 輪詢未公開的 ChatGPT quota endpoints。
+CODEX_RATE_SOURCE=local
+
 # auto 或 custom
 DISPLAY_MODE=custom
 

@@ -122,7 +122,10 @@ class AdapterTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            with patch.dict("os.environ", {"XDG_CACHE_HOME": tmp}):
+            with patch.dict("os.environ", {"XDG_CACHE_HOME": tmp}), patch(
+                "adapters.read_manager_config",
+                return_value={"CODEX_RATE_SOURCE": "auto"},
+            ):
                 snapshot = load_codex()
 
         self.assertEqual(snapshot.extras[0], "Reset credits: 1")
@@ -136,10 +139,25 @@ class AdapterTests(unittest.TestCase):
             reset_credits_available = None
             reset_credit_expirations = ()
 
-        with patch("wham.read_wham_snapshot", return_value=Snapshot()):
+        with patch(
+            "adapters.read_manager_config",
+            return_value={"CODEX_RATE_SOURCE": "auto"},
+        ), patch("wham.read_wham_snapshot", return_value=Snapshot()):
             snapshot = load_codex()
 
         self.assertEqual(snapshot.extras, ("Reset credits: --",))
+
+    def test_codex_local_source_never_reads_wham_cache(self):
+        with patch(
+            "adapters.read_manager_config",
+            return_value={"CODEX_RATE_SOURCE": "local"},
+        ), patch(
+            "wham.read_wham_snapshot",
+            side_effect=AssertionError("wham cache should not be read"),
+        ), patch("codex_rate.find_latest_snapshot", return_value=None):
+            snapshot = load_codex()
+
+        self.assertEqual(snapshot.status, "no_data")
 
     def test_grok_adapter_labels_weekly_window_as_7d(self):
         class Window:

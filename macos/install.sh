@@ -80,6 +80,7 @@ config_file_created=false
 if [[ ! -e "$CONFIG_FILE" ]]; then
     {
         echo "CODEX=true"
+        echo "CODEX_RATE_SOURCE=local"
         echo "CLAUDE=true"
         echo "GROK=true"
         echo "GEMINI=true"
@@ -89,6 +90,10 @@ if [[ ! -e "$CONFIG_FILE" ]]; then
         echo "PROVIDER_ORDER=codex,claude,grok,gemini"
     } > "$CONFIG_FILE"
     config_file_created=true
+fi
+if ! grep -Eq '^[[:space:]]*CODEX_RATE_SOURCE=' "$CONFIG_FILE"; then
+    printf '\n# local (default), auto, or wham; auto/wham opt in to network polling.\n' >> "$CONFIG_FILE"
+    printf 'CODEX_RATE_SOURCE=local\n' >> "$CONFIG_FILE"
 fi
 if [[ "$config_file_created" == true || "$CONFIG_FILE" == "$DEFAULT_CONFIG_FILE" ]]; then
     chmod 600 "$CONFIG_FILE"
