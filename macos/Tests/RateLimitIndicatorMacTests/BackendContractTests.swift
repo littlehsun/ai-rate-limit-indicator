@@ -131,6 +131,20 @@ final class BackendContractTests: XCTestCase {
         XCTAssertEqual(configuration.enabledProviderOrder, ["grok"])
     }
 
+    func testExistingConfigReadErrorsAreNotTreatedAsEmpty() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        XCTAssertThrowsError(
+            try ConfigurationStore.existingContents(at: directory)
+        )
+    }
+
     @MainActor
     func testConfigurationCanReloadAfterExternalProviderFlagEdit() {
         let initial = DisplayConfiguration.defaults

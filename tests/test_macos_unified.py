@@ -91,12 +91,17 @@ class UnifiedMacOSTests(unittest.TestCase):
         views = (
             MACOS / "Sources/RateLimitIndicatorMac/Views.swift"
         ).read_text(encoding="utf-8")
+        configuration = (
+            MACOS / "Sources/RateLimitIndicatorMac/Configuration.swift"
+        ).read_text(encoding="utf-8")
 
         self.assertIn("configuration.indicatorProviders = [provider]", app_model)
         self.assertIn("configuration = previous", app_model)
         self.assertIn("model.configurationErrorMessage", views)
         self.assertIn("model.configuration.enabledProviderOrder", views)
         self.assertIn("reloadConfiguration()", app_model)
+        self.assertIn("try existingContents(at: url)", configuration)
+        self.assertNotIn("let existing = (try?", configuration)
 
     def test_menu_panel_has_intrinsic_content_and_recoverable_empty_state(self):
         views = (

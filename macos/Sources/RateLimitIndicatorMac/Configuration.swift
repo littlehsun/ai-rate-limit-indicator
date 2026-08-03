@@ -77,7 +77,7 @@ enum ConfigurationStore {
             "DROPDOWN_PROVIDERS": configuration.ordered(configuration.dropdownProviders).joined(separator: ","),
             "PROVIDER_ORDER": configuration.providerOrder.joined(separator: ","),
         ]
-        let existing = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        let existing = try existingContents(at: url)
         var output: [String] = []
         var written = Set<String>()
         for line in existing.components(separatedBy: .newlines) where !line.isEmpty {
@@ -116,6 +116,11 @@ enum ConfigurationStore {
         } else {
             try FileManager.default.moveItem(at: temporary, to: url)
         }
+    }
+
+    static func existingContents(at url: URL) throws -> String {
+        guard FileManager.default.fileExists(atPath: url.path) else { return "" }
+        return try String(contentsOf: url, encoding: .utf8)
     }
 
     private static func providers(from value: String?) -> [String]? {
