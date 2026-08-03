@@ -51,6 +51,12 @@ struct BackendClient {
             if let codexHome = BackendPaths.codexHomePath {
                 environment["CODEX_HOME"] = codexHome
             }
+            if let claudeConfigDir = BackendPaths.claudeConfigDirPath {
+                environment["CLAUDE_CONFIG_DIR"] = claudeConfigDir
+            }
+            if let claudeCredentials = BackendPaths.claudeOAuthCredentialsFilePath {
+                environment["CLAUDE_OAUTH_CREDENTIALS_FILE"] = claudeCredentials
+            }
             if let grokHome = BackendPaths.grokHomePath {
                 environment["GROK_HOME"] = grokHome
             }
@@ -134,6 +140,24 @@ enum BackendPaths {
             environmentKey: "CODEX_HOME",
             embeddedValue: Bundle.main.object(
                 forInfoDictionaryKey: "RateLimitIndicatorCodexHome"
+            ) as? String
+        )
+    }
+    static var claudeConfigDirPath: String? {
+        resolveOverride(
+            environment: ProcessInfo.processInfo.environment,
+            environmentKey: "CLAUDE_CONFIG_DIR",
+            embeddedValue: Bundle.main.object(
+                forInfoDictionaryKey: "RateLimitIndicatorClaudeConfigDir"
+            ) as? String
+        )
+    }
+    static var claudeOAuthCredentialsFilePath: String? {
+        resolveOverride(
+            environment: ProcessInfo.processInfo.environment,
+            environmentKey: "CLAUDE_OAUTH_CREDENTIALS_FILE",
+            embeddedValue: Bundle.main.object(
+                forInfoDictionaryKey: "RateLimitIndicatorClaudeOAuthCredentialsFile"
             ) as? String
         )
     }

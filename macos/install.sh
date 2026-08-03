@@ -11,6 +11,8 @@ APP_DIR="${RATE_LIMIT_INDICATOR_APP_DIR:-$HOME/Applications/Rate Limit Indicator
 DEFAULT_CONFIG_FILE="$HOME/.config/rate-limit-indicator/providers.env"
 CONFIG_FILE="${RATE_LIMIT_INDICATOR_CONFIG:-$DEFAULT_CONFIG_FILE}"
 CODEX_HOME_OVERRIDE="${CODEX_HOME:-}"
+CLAUDE_CONFIG_DIR_OVERRIDE="${CLAUDE_CONFIG_DIR:-}"
+CLAUDE_OAUTH_CREDENTIALS_FILE_OVERRIDE="${CLAUDE_OAUTH_CREDENTIALS_FILE:-}"
 GROK_HOME_OVERRIDE="${GROK_HOME:-}"
 GROK_RATE_CACHE_OVERRIDE="${GROK_RATE_CACHE:-}"
 GROK_RATE_BILLING_URL_OVERRIDE="${GROK_RATE_BILLING_URL:-}"
@@ -36,6 +38,9 @@ fi
 canonicalize_path() {
     python3 -c 'import os, sys; print(os.path.realpath(os.path.expanduser(sys.argv[1])))' "$1"
 }
+canonicalize_path_list() {
+    python3 -c 'import os, sys; print(",".join(os.path.realpath(os.path.expanduser(item.strip())) for item in sys.argv[1].split(",") if item.strip()))' "$1"
+}
 PYTHON_BIN="$(command -v python3)"
 if [[ "$PYTHON_BIN" != /* || ! -x "$PYTHON_BIN" ]]; then
     echo "python3 must resolve to an executable absolute path: $PYTHON_BIN" >&2
@@ -49,6 +54,12 @@ CONFIG_FILE="$(canonicalize_path "$CONFIG_FILE")"
 CONFIG_DIR="$(dirname "$CONFIG_FILE")"
 if [[ -n "$CODEX_HOME_OVERRIDE" ]]; then
     CODEX_HOME_OVERRIDE="$(canonicalize_path "$CODEX_HOME_OVERRIDE")"
+fi
+if [[ -n "$CLAUDE_CONFIG_DIR_OVERRIDE" ]]; then
+    CLAUDE_CONFIG_DIR_OVERRIDE="$(canonicalize_path_list "$CLAUDE_CONFIG_DIR_OVERRIDE")"
+fi
+if [[ -n "$CLAUDE_OAUTH_CREDENTIALS_FILE_OVERRIDE" ]]; then
+    CLAUDE_OAUTH_CREDENTIALS_FILE_OVERRIDE="$(canonicalize_path "$CLAUDE_OAUTH_CREDENTIALS_FILE_OVERRIDE")"
 fi
 if [[ -n "$GROK_HOME_OVERRIDE" ]]; then
     GROK_HOME_OVERRIDE="$(canonicalize_path "$GROK_HOME_OVERRIDE")"
@@ -167,6 +178,14 @@ PLIST
 if [[ -n "$CODEX_HOME_OVERRIDE" ]]; then
     /usr/bin/plutil -insert RateLimitIndicatorCodexHome -string "$CODEX_HOME_OVERRIDE" \
         "$APP_DIR/Contents/Info.plist"
+fi
+if [[ -n "$CLAUDE_CONFIG_DIR_OVERRIDE" ]]; then
+    /usr/bin/plutil -insert RateLimitIndicatorClaudeConfigDir \
+        -string "$CLAUDE_CONFIG_DIR_OVERRIDE" "$APP_DIR/Contents/Info.plist"
+fi
+if [[ -n "$CLAUDE_OAUTH_CREDENTIALS_FILE_OVERRIDE" ]]; then
+    /usr/bin/plutil -insert RateLimitIndicatorClaudeOAuthCredentialsFile \
+        -string "$CLAUDE_OAUTH_CREDENTIALS_FILE_OVERRIDE" "$APP_DIR/Contents/Info.plist"
 fi
 if [[ -n "$GROK_HOME_OVERRIDE" ]]; then
     /usr/bin/plutil -insert RateLimitIndicatorGrokHome -string "$GROK_HOME_OVERRIDE" \
