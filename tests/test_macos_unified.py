@@ -22,11 +22,14 @@ class UnifiedMacOSTests(unittest.TestCase):
                 encoding="utf-8",
             )
             fake_python.write_text(
-                '#!/usr/bin/env bash\nprintf "%s" "${CHATGPT_ACCESS_TOKEN:-}" > "$MARKER"\n',
+                '#!/usr/bin/env bash\n'
+                'printf "%s\\n%s" "${CHATGPT_ACCESS_TOKEN:-}" '
+                '"${CHATGPT_WHAM_USAGE_URL:-}" > "$MARKER"\n',
                 encoding="utf-8",
             )
             wham_env.write_text(
-                "export CHATGPT_ACCESS_TOKEN=test-token\n",
+                "export CHATGPT_ACCESS_TOKEN=test-token # personal account\n"
+                'CHATGPT_WHAM_USAGE_URL="https://example.test/#usage" # endpoint\n',
                 encoding="utf-8",
             )
             fake_python.chmod(0o700)
@@ -64,7 +67,10 @@ class UnifiedMacOSTests(unittest.TestCase):
             )
             self.assertEqual(opted_in_result.returncode, 0, opted_in_result.stderr)
             self.assertTrue(marker.exists())
-            self.assertEqual(marker.read_text(encoding="utf-8"), "test-token")
+            self.assertEqual(
+                marker.read_text(encoding="utf-8"),
+                "test-token\nhttps://example.test/#usage",
+            )
 
     def test_provider_pollers_accept_quoted_enabled_flags(self):
         with tempfile.TemporaryDirectory() as tmp:

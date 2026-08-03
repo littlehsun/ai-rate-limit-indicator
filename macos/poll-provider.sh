@@ -37,6 +37,50 @@ config_value() {
     printf '%s' "$value"
 }
 
+strip_unquoted_comment() {
+    local input="$1"
+    local output=""
+    local quote=""
+    local character
+    local previous=""
+    local escaped=false
+    local index
+    for ((index = 0; index < ${#input}; index++)); do
+        character="${input:index:1}"
+        if [[ "$escaped" == true ]]; then
+            output+="$character"
+            escaped=false
+            previous="$character"
+            continue
+        fi
+        if [[ "$character" == "\\" && "$quote" != "'" ]]; then
+            output+="$character"
+            escaped=true
+            previous="$character"
+            continue
+        fi
+        if [[ -n "$quote" ]]; then
+            output+="$character"
+            if [[ "$character" == "$quote" ]]; then
+                quote=""
+            fi
+            previous="$character"
+            continue
+        fi
+        case "$character" in
+            "'"|'"') quote="$character" ;;
+            '#')
+                if [[ -z "$output" || "$previous" == " " || "$previous" == $'\t' ]]; then
+                    break
+                fi
+                ;;
+        esac
+        output+="$character"
+        previous="$character"
+    done
+    printf '%s' "$output" | sed -E 's/[[:space:]]+$//'
+}
+
 load_wham_environment() {
     [[ -f "$WHAM_ENV" ]] || return 0
     local line
@@ -58,6 +102,7 @@ load_wham_environment() {
             *) continue ;;
         esac
         value="$(printf '%s' "$value" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+        value="$(strip_unquoted_comment "$value")"
         case "$value" in
             \"*\"|\'*\') value="${value:1:${#value}-2}" ;;
         esac
