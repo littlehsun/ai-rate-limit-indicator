@@ -81,7 +81,7 @@ private enum MenuBarCompositeImage {
     static func make(for snapshots: [ProviderSnapshot]) -> NSImage? {
         let entries = snapshots.map(entry(for:))
         let widths = entries.map { entry in
-            iconSize + iconTextSpacing + ceil(entry.text.size(withAttributes: entry.attributes).width)
+            iconSize + iconTextSpacing + ceil(entry.text.size().width)
         }
         let width = widths.reduce(0, +)
             + entrySpacing * CGFloat(max(entries.count - 1, 0))
@@ -112,10 +112,9 @@ private enum MenuBarCompositeImage {
                 }
                 cursor += iconSize + iconTextSpacing
                 entry.text.draw(
-                    at: NSPoint(x: cursor, y: 1),
-                    withAttributes: entry.attributes
+                    at: NSPoint(x: cursor, y: 1)
                 )
-                cursor += ceil(entry.text.size(withAttributes: entry.attributes).width)
+                cursor += ceil(entry.text.size().width)
             }
             return true
         }
@@ -134,18 +133,39 @@ private enum MenuBarCompositeImage {
     }
 
     private static func entry(for snapshot: ProviderSnapshot) -> CompositeEntry {
-        guard let window = primaryWindow(snapshot) else {
+        let windows = snapshot.indicatorDisplayWindows
+        guard !windows.isEmpty else {
             return CompositeEntry(
                 provider: snapshot.provider,
-                text: "--" as NSString,
-                attributes: textAttributes(color: .secondaryLabelColor)
+                text: NSAttributedString(
+                    string: "--",
+                    attributes: textAttributes(color: .secondaryLabelColor)
+                )
             )
         }
+        let text = NSMutableAttributedString()
         let stale = snapshot.status == "stale" ? "~" : ""
+        for (index, window) in windows.enumerated() {
+            if index > 0 {
+                text.append(NSAttributedString(
+                    string: "|",
+                    attributes: textAttributes(color: .secondaryLabelColor)
+                ))
+            }
+            text.append(NSAttributedString(
+                string: "\(index == 0 ? stale : "")\(window.usedPercent)%",
+                attributes: textAttributes(color: usageColor(for: window.usedPercent))
+            ))
+        }
+        if let resetWindow = snapshot.indicatorResetWindow {
+            text.append(NSAttributedString(
+                string: " ⟳\(UsageFormatting.countdown(to: resetWindow.resetsAt))",
+                attributes: textAttributes(color: .secondaryLabelColor)
+            ))
+        }
         return CompositeEntry(
             provider: snapshot.provider,
-            text: "\(stale)\(window.usedPercent)%" as NSString,
-            attributes: textAttributes(color: usageColor(for: window.usedPercent))
+            text: text
         )
     }
 
@@ -182,8 +202,7 @@ private enum MenuBarCompositeImage {
 
     private struct CompositeEntry {
         let provider: String
-        let text: NSString
-        let attributes: [NSAttributedString.Key: Any]
+        let text: NSAttributedString
     }
 }
 
