@@ -39,7 +39,13 @@ struct ProviderIcon: View {
             "gemini": "gemini-logo.svg",
         ]
         guard let name = names[provider] else { return nil }
-        return NSImage(contentsOf: BackendPaths.assetsURL.appendingPathComponent(name))
+        guard let image = NSImage(
+            contentsOf: BackendPaths.assetsURL.appendingPathComponent(name)
+        ) else {
+            return nil
+        }
+        image.size = NSSize(width: size, height: size)
+        return image
     }
 }
 
@@ -47,21 +53,134 @@ struct MenuBarLabel: View {
     let snapshots: [ProviderSnapshot]
 
     var body: some View {
-        HStack(spacing: 7) {
-            if snapshots.isEmpty {
-                Text("--")
-                    .monospacedDigit()
-            } else {
-                ForEach(Array(snapshots.enumerated()), id: \.element.id) { index, snapshot in
-                    if index > 0 {
-                        Rectangle()
-                            .fill(Color.gray)
-                            .frame(width: 1, height: 14)
-                    }
-                    ProviderStatusLabel(snapshot: snapshot)
-                }
-            }
+        if snapshots.isEmpty {
+            Text("--")
+                .monospacedDigit()
+        } else if snapshots.count == 1, let snapshot = snapshots.first {
+            ProviderStatusLabel(snapshot: snapshot)
+        } else if let image = MenuBarCompositeImage.make(for: snapshots) {
+            Image(nsImage: image)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: image.size.width, height: image.size.height)
+                .help(MenuBarCompositeImage.helpText(for: snapshots))
+        } else {
+            Text("--")
+                .monospacedDigit()
         }
+    }
+}
+
+private enum MenuBarCompositeImage {
+    private static let iconSize: CGFloat = 13
+    private static let height: CGFloat = 16
+    private static let iconTextSpacing: CGFloat = 3
+    private static let entrySpacing: CGFloat = 7
+    private static let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+
+    static func make(for snapshots: [ProviderSnapshot]) -> NSImage? {
+        let entries = snapshots.map(entry(for:))
+        let widths = entries.map { entry in
+            iconSize + iconTextSpacing + ceil(entry.text.size(withAttributes: entry.attributes).width)
+        }
+        let width = widths.reduce(0, +)
+            + entrySpacing * CGFloat(max(entries.count - 1, 0))
+        guard width > 0 else { return nil }
+
+        let image = NSImage(size: NSSize(width: width, height: height), flipped: false) { _ in
+            var cursor: CGFloat = 0
+            for (index, entry) in entries.enumerated() {
+                if index > 0 {
+                    cursor += entrySpacing / 2
+                    NSColor.labelColor.withAlphaComponent(0.65).setFill()
+                    NSRect(x: cursor, y: 2, width: 1, height: height - 4).fill()
+                    cursor += entrySpacing / 2
+                }
+
+                if let logo = providerImage(entry.provider) {
+                    logo.draw(
+                        in: NSRect(
+                            x: cursor,
+                            y: (height - iconSize) / 2,
+                            width: iconSize,
+                            height: iconSize
+                        ),
+                        from: .zero,
+                        operation: .sourceOver,
+                        fraction: 1
+                    )
+                }
+                cursor += iconSize + iconTextSpacing
+                entry.text.draw(
+                    at: NSPoint(x: cursor, y: 1),
+                    withAttributes: entry.attributes
+                )
+                cursor += ceil(entry.text.size(withAttributes: entry.attributes).width)
+            }
+            return true
+        }
+        image.isTemplate = false
+        return image
+    }
+
+    static func helpText(for snapshots: [ProviderSnapshot]) -> String {
+        snapshots.map { snapshot in
+            guard let window = primaryWindow(snapshot) else {
+                return "\(snapshot.label): no data"
+            }
+            let stale = snapshot.status == "stale" ? "cached " : ""
+            return "\(snapshot.label): \(stale)\(window.usedPercent)%"
+        }.joined(separator: ", ")
+    }
+
+    private static func entry(for snapshot: ProviderSnapshot) -> CompositeEntry {
+        guard let window = primaryWindow(snapshot) else {
+            return CompositeEntry(
+                provider: snapshot.provider,
+                text: "--" as NSString,
+                attributes: textAttributes(color: .secondaryLabelColor)
+            )
+        }
+        let stale = snapshot.status == "stale" ? "~" : ""
+        return CompositeEntry(
+            provider: snapshot.provider,
+            text: "\(stale)\(window.usedPercent)%" as NSString,
+            attributes: textAttributes(color: usageColor(for: window.usedPercent))
+        )
+    }
+
+    private static func primaryWindow(_ snapshot: ProviderSnapshot) -> UsageWindow? {
+        snapshot.windows.first(where: \.isSevenDay) ?? snapshot.windows.first
+    }
+
+    private static func providerImage(_ provider: String) -> NSImage? {
+        let names = [
+            "codex": "codex-logo.png",
+            "claude": "claude-logo.svg",
+            "grok": "grok-logo.png",
+            "gemini": "gemini-logo.svg",
+        ]
+        guard let name = names[provider] else { return nil }
+        return NSImage(contentsOf: BackendPaths.assetsURL.appendingPathComponent(name))
+    }
+
+    private static func textAttributes(color: NSColor) -> [NSAttributedString.Key: Any] {
+        [
+            .font: font,
+            .foregroundColor: color,
+        ]
+    }
+
+    private static func usageColor(for value: Int) -> NSColor {
+        if value >= 90 { return NSColor(calibratedRed: 1, green: 0.33, blue: 0.33, alpha: 1) }
+        if value >= 70 { return NSColor(calibratedRed: 1, green: 0.72, blue: 0.18, alpha: 1) }
+        return NSColor(calibratedRed: 0, green: 0.69, blue: 0.31, alpha: 1)
+    }
+
+    private struct CompositeEntry {
+        let provider: String
+        let text: NSString
+        let attributes: [NSAttributedString.Key: Any]
     }
 }
 
@@ -70,7 +189,7 @@ private struct ProviderStatusLabel: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            ProviderIcon(provider: snapshot.provider)
+            ProviderIcon(provider: snapshot.provider, size: 13)
             if snapshot.windows.isEmpty {
                 Text("--")
                     .foregroundStyle(.secondary)
@@ -94,11 +213,20 @@ private struct ProviderStatusLabel: View {
             }
         }
         .font(.system(size: 11, weight: .medium, design: .monospaced))
+        .help(statusHelp)
+    }
+
+    private var statusHelp: String {
+        if snapshot.status == "stale" {
+            return "\(snapshot.label): cached data; sign in to the provider to refresh it."
+        }
+        return snapshot.label
     }
 }
 
 struct MenuContentView: View {
     @ObservedObject var model: AppModel
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -109,24 +237,47 @@ struct MenuContentView: View {
                     .padding()
             }
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(model.dropdownSnapshots.enumerated()), id: \.element.id) { index, snapshot in
-                        if index > 0 {
-                            Divider()
-                                .padding(.horizontal, 16)
+            if model.isRefreshing && model.snapshots.isEmpty {
+                VStack(spacing: 10) {
+                    ProgressView()
+                    Text("Loading provider usage…")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 140)
+            } else if model.dropdownSnapshots.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "rectangle.stack.badge.minus")
+                        .font(.system(size: 28))
+                        .foregroundStyle(.secondary)
+                    Text("No providers shown in the menu panel")
+                        .font(.headline)
+                    Text("Choose at least one provider in Display settings.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Button("Open Display settings…", action: showSettings)
+                        .buttonStyle(.borderedProminent)
+                }
+                .frame(maxWidth: .infinity, minHeight: 160)
+                .padding(.horizontal, 20)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(model.dropdownSnapshots.enumerated()), id: \.element.id) { index, snapshot in
+                            if index > 0 {
+                                Divider()
+                                    .padding(.horizontal, 16)
+                            }
+                            ProviderSectionView(snapshot: snapshot, model: model)
                         }
-                        ProviderSectionView(snapshot: snapshot, model: model)
                     }
                 }
+                .frame(height: providerListHeight)
             }
-            .frame(maxHeight: 620)
 
             Divider()
             HStack {
-                SettingsLink {
-                    Text("Display settings…")
-                }
+                Button("Display settings…", action: showSettings)
                 .buttonStyle(.plain)
                 Spacer()
                 Button {
@@ -149,6 +300,15 @@ struct MenuContentView: View {
             .padding(14)
         }
         .frame(width: 440)
+    }
+
+    private func showSettings() {
+        NSApp.activate()
+        openSettings()
+    }
+
+    private var providerListHeight: CGFloat {
+        min(max(CGFloat(model.dropdownSnapshots.count) * 120, 160), 520)
     }
 }
 
@@ -209,7 +369,7 @@ private struct ProviderSectionView: View {
     }
 
     private var statusSuffix: String {
-        ["error", "no_data"].contains(snapshot.status)
+        ["error", "no_data", "stale"].contains(snapshot.status)
             ? " (\(snapshot.status.replacingOccurrences(of: "_", with: " ")))"
             : ""
     }
@@ -269,53 +429,73 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section("Indicator mode") {
-                Picker("Mode", selection: modeBinding) {
-                    Text("Auto: recent 7D change").tag(DisplayMode.auto)
-                    Text("Custom provider list").tag(DisplayMode.custom)
+            Section {
+                Picker("Display mode", selection: modeBinding) {
+                    Text("Automatic").tag(DisplayMode.auto)
+                    Text("Choose providers").tag(DisplayMode.custom)
                 }
-                .pickerStyle(.radioGroup)
-            }
+                .pickerStyle(.segmented)
 
-            Section("Providers") {
-                Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 9) {
-                    GridRow {
-                        Text("Provider")
-                        Text("Indicator")
-                        Text("Dropdown")
-                        Text("Order")
-                    }
+                Text(modeDescription)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    Divider()
-                        .gridCellColumns(4)
-                    ForEach(Array(model.configuration.providerOrder.enumerated()), id: \.element) { index, provider in
-                        GridRow {
-                            HStack {
-                                ProviderIcon(provider: provider, size: 17)
+            } header: {
+                Text("Menu bar")
+            } footer: {
+                Text("Click the usage display in the macOS menu bar to open the provider panel.")
+            }
+
+            Section {
+                providerMenu(
+                    title: "Show in menu bar",
+                    providers: model.configuration.indicatorProviders
+                ) { provider in
+                    if model.configuration.mode == .auto {
+                        model.setMode(.custom)
+                    }
+                    model.toggleIndicator(provider)
+                }
+
+                providerMenu(
+                    title: "Show in menu panel",
+                    providers: model.configuration.dropdownProviders
+                ) { provider in
+                    model.toggleDropdown(provider)
+                }
+
+                LabeledContent("Display order") {
+                    VStack(alignment: .trailing, spacing: 6) {
+                        ForEach(
+                            Array(model.configuration.providerOrder.enumerated()),
+                            id: \.element
+                        ) { index, provider in
+                            HStack(spacing: 6) {
+                                ProviderIcon(provider: provider, size: 15)
                                 Text(ProviderCatalog.label(for: provider))
-                            }
-                            Toggle("", isOn: providerBinding(provider, keyPath: \.indicatorProviders))
-                                .labelsHidden()
-                            Toggle("", isOn: providerBinding(provider, keyPath: \.dropdownProviders))
-                                .labelsHidden()
-                            HStack(spacing: 5) {
+                                Spacer()
                                 Button {
                                     model.moveProvider(provider, offset: -1)
                                 } label: {
                                     Image(systemName: "chevron.up")
                                 }
                                 .disabled(index == 0)
+                                .accessibilityLabel("Move \(ProviderCatalog.label(for: provider)) up")
                                 Button {
                                     model.moveProvider(provider, offset: 1)
                                 } label: {
                                     Image(systemName: "chevron.down")
                                 }
                                 .disabled(index == model.configuration.providerOrder.count - 1)
+                                .accessibilityLabel("Move \(ProviderCatalog.label(for: provider)) down")
                             }
+                            .frame(width: 270)
                         }
                     }
                 }
+            } header: {
+                Text("Providers")
+            } footer: {
+                Text("Menu panel controls the provider sections shown after clicking the menu bar item.")
             }
 
             Section("Startup") {
@@ -339,7 +519,63 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
-        .frame(width: 560, height: 430)
+        .frame(width: 600, height: 500)
+    }
+
+    private func providerMenu(
+        title: String,
+        providers: [String],
+        toggle: @escaping (String) -> Void
+    ) -> some View {
+        LabeledContent(title) {
+            Menu {
+                ForEach(model.configuration.providerOrder, id: \.self) { provider in
+                    Button {
+                        toggle(provider)
+                    } label: {
+                        if providers.contains(provider) {
+                            Label(
+                                ProviderCatalog.label(for: provider),
+                                systemImage: "checkmark"
+                            )
+                        } else {
+                            Text(ProviderCatalog.label(for: provider))
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(providerSummary(providers))
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(minWidth: 220, alignment: .trailing)
+            }
+            .menuStyle(.borderlessButton)
+            .accessibilityLabel(title)
+        }
+    }
+
+    private func providerSummary(_ providers: [String]) -> String {
+        let ordered = model.configuration.providerOrder.filter(providers.contains)
+        if ordered.isEmpty {
+            return "None"
+        }
+        if ordered.count == ProviderCatalog.order.count {
+            return "All providers"
+        }
+        return ordered.map(ProviderCatalog.label(for:)).joined(separator: ", ")
+    }
+
+    private var modeDescription: String {
+        switch model.configuration.mode {
+        case .auto:
+            "Shows the provider with the most recent meaningful 7D usage change."
+        case .custom:
+            "Shows every provider checked in the Menu bar column."
+        }
     }
 
     private var modeBinding: Binding<DisplayMode> {
@@ -349,21 +585,4 @@ struct SettingsView: View {
         )
     }
 
-    private func providerBinding(
-        _ provider: String,
-        keyPath: KeyPath<DisplayConfiguration, [String]>
-    ) -> Binding<Bool> {
-        Binding(
-            get: { model.configuration[keyPath: keyPath].contains(provider) },
-            set: { enabled in
-                let currentlyEnabled = model.configuration[keyPath: keyPath].contains(provider)
-                guard enabled != currentlyEnabled else { return }
-                if keyPath == \DisplayConfiguration.indicatorProviders {
-                    model.toggleIndicator(provider)
-                } else {
-                    model.toggleDropdown(provider)
-                }
-            }
-        )
-    }
 }

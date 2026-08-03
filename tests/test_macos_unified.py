@@ -39,6 +39,37 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn("LSUIElement", mac_installer)
         self.assertIn("poll-provider.sh", mac_installer)
 
+    def test_menu_panel_has_intrinsic_content_and_recoverable_empty_state(self):
+        views = (
+            MACOS / "Sources/RateLimitIndicatorMac/Views.swift"
+        ).read_text(encoding="utf-8")
+
+        self.assertNotIn("LazyVStack", views)
+        self.assertIn(".frame(height: providerListHeight)", views)
+        self.assertIn("No providers shown in the menu panel", views)
+        self.assertIn("Open Display settings…", views)
+
+    def test_menu_panel_activates_app_before_opening_settings(self):
+        views = (
+            MACOS / "Sources/RateLimitIndicatorMac/Views.swift"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(r"@Environment(\.openSettings)", views)
+        self.assertIn("NSApp.activate()", views)
+        self.assertIn("openSettings()", views)
+
+    def test_multiple_menu_bar_providers_use_one_composite_brand_image(self):
+        views = (
+            MACOS / "Sources/RateLimitIndicatorMac/Views.swift"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("private enum MenuBarCompositeImage", views)
+        self.assertIn("MenuBarCompositeImage.make(for: snapshots)", views)
+        self.assertIn("logo.draw(", views)
+        self.assertIn("NSColor.labelColor.withAlphaComponent(0.65)", views)
+        self.assertIn("snapshot.windows.first(where: \\.isSevenDay)", views)
+        self.assertIn('snapshot.status == "stale" ? "~" : ""', views)
+
 
 if __name__ == "__main__":
     unittest.main()
