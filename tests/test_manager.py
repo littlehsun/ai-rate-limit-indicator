@@ -7,9 +7,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MANAGER = ROOT / "manage.sh"
+CODEX_INSTALLER = ROOT / "providers/codex/ubuntu-indicator/install.sh"
 
 
 class ManagerTests(unittest.TestCase):
+    def test_standalone_codex_installer_defaults_to_local_source(self):
+        installer = CODEX_INSTALLER.read_text(encoding="utf-8")
+
+        self.assertIn("CODEX_RATE_SOURCE=local", installer)
+        self.assertNotIn("CODEX_RATE_SOURCE=auto", installer)
+
     def _environment(self, root: Path) -> tuple[dict[str, str], Path]:
         fake_bin = root / "bin"
         fake_bin.mkdir()

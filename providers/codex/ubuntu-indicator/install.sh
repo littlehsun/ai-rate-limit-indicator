@@ -131,13 +131,13 @@ if [[ ! -e "$WHAM_ENV" ]]; then
 # This is an undocumented ChatGPT backend. By default the poller uses
 # ~/.codex/auth.json from your logged-in Codex session.
 # CHATGPT_ACCESS_TOKEN=optional-token-override
-CODEX_RATE_SOURCE=auto
+CODEX_RATE_SOURCE=local
 CODEX_RATE_SHOW_5H=false
 EOF
     chmod 600 "$WHAM_ENV"
 fi
 if ! grep -Eq '^[[:space:]]*CODEX_RATE_SOURCE=' "$WHAM_ENV"; then
-    printf '\nCODEX_RATE_SOURCE=auto\n' >> "$WHAM_ENV"
+    printf '\nCODEX_RATE_SOURCE=local\n' >> "$WHAM_ENV"
 fi
 if ! grep -Eq '^[[:space:]]*CODEX_RATE_SHOW_5H=' "$WHAM_ENV"; then
     printf 'CODEX_RATE_SHOW_5H=false\n' >> "$WHAM_ENV"
