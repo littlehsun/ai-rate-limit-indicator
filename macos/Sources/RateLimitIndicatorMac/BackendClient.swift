@@ -51,6 +51,9 @@ struct BackendClient {
             if let codexHome = BackendPaths.codexHomePath {
                 environment["CODEX_HOME"] = codexHome
             }
+            if let codexWhamCache = BackendPaths.codexWhamCachePath {
+                environment["CODEX_RATE_WHAM_CACHE"] = codexWhamCache
+            }
             if let claudeConfigDir = BackendPaths.claudeConfigDirPath {
                 environment["CLAUDE_CONFIG_DIR"] = claudeConfigDir
             }
@@ -143,6 +146,15 @@ enum BackendPaths {
             environmentKey: "CODEX_HOME",
             embeddedValue: Bundle.main.object(
                 forInfoDictionaryKey: "RateLimitIndicatorCodexHome"
+            ) as? String
+        )
+    }
+    static var codexWhamCachePath: String? {
+        resolveOverride(
+            environment: ProcessInfo.processInfo.environment,
+            environmentKey: "CODEX_RATE_WHAM_CACHE",
+            embeddedValue: Bundle.main.object(
+                forInfoDictionaryKey: "RateLimitIndicatorCodexWhamCache"
             ) as? String
         )
     }

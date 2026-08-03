@@ -200,6 +200,14 @@ load_wham_environment() {
 }
 
 case "$provider" in
+    resolve-codex-cache)
+        load_wham_environment
+        if [[ -n "${CODEX_RATE_WHAM_CACHE:-}" ]]; then
+            printf '%s\n' "$CODEX_RATE_WHAM_CACHE"
+        elif [[ -n "${XDG_CACHE_HOME:-}" ]]; then
+            printf '%s\n' "$XDG_CACHE_HOME/codex-rate-indicator/wham.json"
+        fi
+        ;;
     codex)
         is_enabled CODEX || exit 0
         case "$(config_value CODEX_RATE_SOURCE)" in
@@ -214,7 +222,7 @@ case "$provider" in
         exec "$PYTHON_BIN" "$APP_SUPPORT/backend/collectors/grok_rate.py" --once
         ;;
     *)
-        echo "Usage: $0 {codex|grok}" >&2
+        echo "Usage: $0 {codex|grok|resolve-codex-cache}" >&2
         exit 2
         ;;
 esac

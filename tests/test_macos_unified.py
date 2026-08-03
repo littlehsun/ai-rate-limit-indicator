@@ -49,6 +49,45 @@ class UnifiedMacOSTests(unittest.TestCase):
                 }
             )
 
+            resolved_cache = subprocess.run(
+                ["bash", str(MACOS / "poll-provider.sh"), "resolve-codex-cache"],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertEqual(resolved_cache.returncode, 0, resolved_cache.stderr)
+            self.assertEqual(
+                resolved_cache.stdout.strip(),
+                str(temp_dir / "cache-root/wham.json"),
+            )
+
+            wham_env.write_text(
+                'XDG_CACHE_HOME="${HOME}/alternate-cache"\n',
+                encoding="utf-8",
+            )
+            xdg_cache = subprocess.run(
+                ["bash", str(MACOS / "poll-provider.sh"), "resolve-codex-cache"],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertEqual(xdg_cache.returncode, 0, xdg_cache.stderr)
+            self.assertEqual(
+                xdg_cache.stdout.strip(),
+                str(temp_dir / "alternate-cache/codex-rate-indicator/wham.json"),
+            )
+
+            wham_env.write_text(
+                "export CHATGPT_ACCESS_TOKEN=test-token # personal account\n"
+                'CHATGPT_WHAM_USAGE_URL="https://example.test/#usage" # endpoint\n'
+                'CODEX_AUTH_FILE=$HOME/Library/Application\\ Support/Codex/auth.json\n'
+                'XDG_CACHE_HOME="${HOME}/cache-root"\n'
+                'CODEX_RATE_WHAM_CACHE="${XDG_CACHE_HOME}/wham.json"\n',
+                encoding="utf-8",
+            )
+
             local_result = subprocess.run(
                 ["bash", str(MACOS / "poll-provider.sh"), "codex"],
                 check=False,
@@ -178,6 +217,7 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn("RateLimitIndicatorConfigPath", mac_installer)
         self.assertIn("RateLimitIndicatorPythonPath", mac_installer)
         self.assertIn("RateLimitIndicatorCodexHome", mac_installer)
+        self.assertIn("RateLimitIndicatorCodexWhamCache", mac_installer)
         self.assertIn("RateLimitIndicatorClaudeConfigDir", mac_installer)
         self.assertIn("RateLimitIndicatorClaudeOAuthCredentialsFile", mac_installer)
         self.assertIn("RateLimitIndicatorGrokHome", mac_installer)
@@ -208,6 +248,7 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertNotIn("<string>$APP_SUPPORT", mac_installer)
         self.assertNotIn("<string>$LOG_DIR", mac_installer)
         self.assertIn("EnvironmentVariables.CODEX_AUTH_FILE", mac_installer)
+        self.assertIn("EnvironmentVariables.CODEX_RATE_WHAM_CACHE", mac_installer)
         self.assertIn('"$CODEX_HOME_OVERRIDE/auth.json"', mac_installer)
         self.assertIn("EnvironmentVariables.GROK_HOME", mac_installer)
         self.assertIn("EnvironmentVariables.GROK_RATE_CACHE", mac_installer)

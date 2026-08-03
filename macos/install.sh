@@ -11,6 +11,7 @@ APP_DIR="${RATE_LIMIT_INDICATOR_APP_DIR:-$HOME/Applications/Rate Limit Indicator
 DEFAULT_CONFIG_FILE="$HOME/.config/rate-limit-indicator/providers.env"
 CONFIG_FILE="${RATE_LIMIT_INDICATOR_CONFIG:-}"
 CODEX_HOME_OVERRIDE="${CODEX_HOME:-}"
+CODEX_WHAM_CACHE_OVERRIDE="${CODEX_RATE_WHAM_CACHE:-}"
 CLAUDE_CONFIG_DIR_OVERRIDE="${CLAUDE_CONFIG_DIR:-}"
 CLAUDE_OAUTH_CREDENTIALS_FILE_OVERRIDE="${CLAUDE_OAUTH_CREDENTIALS_FILE:-}"
 GROK_HOME_OVERRIDE="${GROK_HOME:-}"
@@ -74,6 +75,17 @@ fi
 if [[ -z "$CODEX_HOME_OVERRIDE" ]]; then
     CODEX_HOME_OVERRIDE="$(read_existing_plist_value "$EXISTING_INFO_PLIST" RateLimitIndicatorCodexHome)"
 fi
+if [[ -z "$CODEX_WHAM_CACHE_OVERRIDE" && -f "$LEGACY_CODEX_ENV" ]]; then
+    CODEX_WHAM_CACHE_OVERRIDE="$(
+        env -u CODEX_RATE_WHAM_CACHE -u XDG_CACHE_HOME \
+            CODEX_RATE_WHAM_ENV="$LEGACY_CODEX_ENV" \
+            "$SCRIPT_DIR/poll-provider.sh" resolve-codex-cache
+    )"
+fi
+if [[ -z "$CODEX_WHAM_CACHE_OVERRIDE" ]]; then
+    CODEX_WHAM_CACHE_OVERRIDE="$(read_existing_plist_value \
+        "$EXISTING_INFO_PLIST" RateLimitIndicatorCodexWhamCache)"
+fi
 if [[ -z "$CLAUDE_CONFIG_DIR_OVERRIDE" ]]; then
     CLAUDE_CONFIG_DIR_OVERRIDE="$(read_existing_plist_value "$EXISTING_INFO_PLIST" RateLimitIndicatorClaudeConfigDir)"
 fi
@@ -99,6 +111,9 @@ CONFIG_FILE="$(canonicalize_path "$CONFIG_FILE")"
 CONFIG_DIR="$(dirname "$CONFIG_FILE")"
 if [[ -n "$CODEX_HOME_OVERRIDE" ]]; then
     CODEX_HOME_OVERRIDE="$(canonicalize_path "$CODEX_HOME_OVERRIDE")"
+fi
+if [[ -n "$CODEX_WHAM_CACHE_OVERRIDE" ]]; then
+    CODEX_WHAM_CACHE_OVERRIDE="$(canonicalize_path "$CODEX_WHAM_CACHE_OVERRIDE")"
 fi
 if [[ -n "$CLAUDE_CONFIG_DIR_OVERRIDE" ]]; then
     CLAUDE_CONFIG_DIR_OVERRIDE="$(canonicalize_path_list "$CLAUDE_CONFIG_DIR_OVERRIDE")"
@@ -229,6 +244,10 @@ if [[ -n "$CODEX_HOME_OVERRIDE" ]]; then
     /usr/bin/plutil -insert RateLimitIndicatorCodexHome -string "$CODEX_HOME_OVERRIDE" \
         "$APP_DIR/Contents/Info.plist"
 fi
+if [[ -n "$CODEX_WHAM_CACHE_OVERRIDE" ]]; then
+    /usr/bin/plutil -insert RateLimitIndicatorCodexWhamCache \
+        -string "$CODEX_WHAM_CACHE_OVERRIDE" "$APP_DIR/Contents/Info.plist"
+fi
 if [[ -n "$CLAUDE_CONFIG_DIR_OVERRIDE" ]]; then
     /usr/bin/plutil -insert RateLimitIndicatorClaudeConfigDir \
         -string "$CLAUDE_CONFIG_DIR_OVERRIDE" "$APP_DIR/Contents/Info.plist"
@@ -293,6 +312,10 @@ PLIST
     if [[ "$provider" == "codex" && -n "$CODEX_HOME_OVERRIDE" ]]; then
         /usr/bin/plutil -insert EnvironmentVariables.CODEX_AUTH_FILE \
             -string "$CODEX_HOME_OVERRIDE/auth.json" "$plist"
+    fi
+    if [[ "$provider" == "codex" && -n "$CODEX_WHAM_CACHE_OVERRIDE" ]]; then
+        /usr/bin/plutil -insert EnvironmentVariables.CODEX_RATE_WHAM_CACHE \
+            -string "$CODEX_WHAM_CACHE_OVERRIDE" "$plist"
     fi
     if [[ "$provider" == "grok" ]]; then
         if [[ -n "$GROK_HOME_OVERRIDE" ]]; then
