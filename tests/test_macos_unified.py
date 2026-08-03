@@ -58,6 +58,10 @@ class UnifiedMacOSTests(unittest.TestCase):
         )
         self.assertIn("legacy_login_was_enabled=true", mac_installer)
         self.assertIn("migrate-legacy-launch-at-login", mac_installer)
+        self.assertLess(
+            mac_installer.index('launchctl bootstrap "gui/$UID" "$plist"'),
+            mac_installer.index('rm -f "$LEGACY_CODEX_PLIST"'),
+        )
 
     def test_refresh_failure_marks_retained_snapshots_stale(self):
         app_model = (

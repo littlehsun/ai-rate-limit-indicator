@@ -37,21 +37,13 @@ CONFIG_FILE="$(canonicalize_path "$CONFIG_FILE")"
 CONFIG_DIR="$(dirname "$CONFIG_FILE")"
 
 echo "=== Unified Rate Limit Indicator for macOS ==="
-echo "Removing the legacy Codex menu-bar LaunchAgent..."
 legacy_login_was_enabled=false
 if launchctl print "gui/$UID/com.hsun.codex-rate-menubar" >/dev/null 2>&1; then
     legacy_login_was_enabled=true
 fi
-launchctl bootout "gui/$UID/com.hsun.codex-rate-menubar" 2>/dev/null || true
-launchctl bootout "gui/$UID" "$LEGACY_CODEX_PLIST" 2>/dev/null || true
-rm -f "$LEGACY_CODEX_PLIST"
 
 echo "[1/5] Installing the shared provider backend..."
 mkdir -p "$BACKEND_DIR" "$COLLECTOR_DIR" "$ASSET_DIR"
-if [[ "$legacy_login_was_enabled" == true ]]; then
-    touch "$LEGACY_LOGIN_MIGRATION_MARKER"
-    chmod 600 "$LEGACY_LOGIN_MIGRATION_MARKER"
-fi
 cp "$ROOT_DIR/unified-indicator/models.py" "$BACKEND_DIR/models.py"
 cp "$ROOT_DIR/unified-indicator/adapters.py" "$BACKEND_DIR/adapters.py"
 cp "$ROOT_DIR/unified-indicator/agy_rate.py" "$BACKEND_DIR/agy_rate.py"
@@ -170,6 +162,15 @@ PLIST
     launchctl bootout "gui/$UID" "$plist" 2>/dev/null || true
     launchctl bootstrap "gui/$UID" "$plist"
 done
+
+echo "Retiring the legacy Codex menu-bar LaunchAgent..."
+if [[ "$legacy_login_was_enabled" == true ]]; then
+    touch "$LEGACY_LOGIN_MIGRATION_MARKER"
+    chmod 600 "$LEGACY_LOGIN_MIGRATION_MARKER"
+fi
+launchctl bootout "gui/$UID/com.hsun.codex-rate-menubar" 2>/dev/null || true
+launchctl bootout "gui/$UID" "$LEGACY_CODEX_PLIST" 2>/dev/null || true
+rm -f "$LEGACY_CODEX_PLIST"
 
 echo "[5/5] Installed."
 echo "App: $APP_DIR"
