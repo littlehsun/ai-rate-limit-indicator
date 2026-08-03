@@ -51,6 +51,10 @@ def read_manager_config(path: Optional[Path] = None) -> dict[str, str]:
         if "=" not in stripped:
             continue
         key, value = stripped.split("=", 1)
+        normalized_key = key.strip()
+        key_parts = normalized_key.split(None, 1)
+        if len(key_parts) == 2 and key_parts[0].lower() == "export":
+            normalized_key = key_parts[1]
         normalized = value.strip()
         if (
             len(normalized) >= 2
@@ -58,7 +62,7 @@ def read_manager_config(path: Optional[Path] = None) -> dict[str, str]:
             and normalized[0] in {"'", '"'}
         ):
             normalized = normalized[1:-1]
-        values[key.strip().upper()] = normalized
+        values[normalized_key.upper()] = normalized
     return values
 
 

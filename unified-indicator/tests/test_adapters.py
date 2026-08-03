@@ -30,14 +30,18 @@ class AdapterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             config = Path(tmp) / "providers.env"
             config.write_text(
-                'CODEX_RATE_SOURCE="auto"\nDISPLAY_MODE=\'custom\'\n',
+                'export CODEX=\'true\'\n'
+                'export CODEX_RATE_SOURCE="auto"\n'
+                "DISPLAY_MODE='custom'\n",
                 encoding="utf-8",
             )
 
             values = read_manager_config(config)
+            enabled = enabled_providers(config)
 
         self.assertEqual(values["CODEX_RATE_SOURCE"], "auto")
         self.assertEqual(values["DISPLAY_MODE"], "custom")
+        self.assertEqual(enabled, ("codex",))
 
     def test_config_selects_enabled_providers_in_stable_order(self):
         with tempfile.TemporaryDirectory() as tmp:
