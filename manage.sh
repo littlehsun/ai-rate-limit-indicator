@@ -55,6 +55,7 @@ read_enabled() {
 read_config_value() {
     local key="$1"
     local file="${2:-$CONFIG_FILE}"
+    [[ -f "$file" ]] || return 0
     sed -n -E "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*([^#[:space:]]+).*$/\\1/p" \
         "$file" 2>/dev/null | tail -n 1 | tr '[:upper:]' '[:lower:]'
 }
@@ -160,12 +161,17 @@ disable_individual_autostarts() {
 install_manager() {
     mkdir -p "$CONFIG_DIR" "$APP_DIR" "$REAL_HOME/.local/bin" "$REAL_HOME/.config/autostart"
     chmod 700 "$CONFIG_DIR"
+    legacy_codex_source="$(read_config_value CODEX_RATE_SOURCE "$LEGACY_CODEX_ENV")"
+    case "$legacy_codex_source" in
+        auto|wham) ;;
+        *) legacy_codex_source=local ;;
+    esac
 
     if [[ ! -e "$CONFIG_FILE" ]]; then
         {
             echo "# Select the indicators managed at GNOME login."
             echo "CODEX=true"
-            echo "CODEX_RATE_SOURCE=local"
+            echo "CODEX_RATE_SOURCE=$legacy_codex_source"
             echo "CLAUDE=true"
             echo "GROK=true"
             echo "GEMINI=true"
@@ -176,11 +182,6 @@ install_manager() {
         } > "$CONFIG_FILE"
     fi
     if ! grep -Eq '^[[:space:]]*CODEX_RATE_SOURCE=' "$CONFIG_FILE"; then
-        legacy_codex_source="$(read_config_value CODEX_RATE_SOURCE "$LEGACY_CODEX_ENV")"
-        case "$legacy_codex_source" in
-            auto|wham) ;;
-            *) legacy_codex_source=local ;;
-        esac
         printf '\n# local (default), auto, or wham; auto/wham opt in to network polling.\n' >> "$CONFIG_FILE"
         printf 'CODEX_RATE_SOURCE=%s\n' "$legacy_codex_source" >> "$CONFIG_FILE"
     fi

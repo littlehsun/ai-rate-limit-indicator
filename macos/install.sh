@@ -92,10 +92,21 @@ if [[ "$config_dir_created" == true && "$CONFIG_FILE" == "$DEFAULT_CONFIG_FILE" 
     chmod 700 "$CONFIG_DIR"
 fi
 config_file_created=false
+legacy_codex_source=""
+if [[ -f "$LEGACY_CODEX_ENV" ]]; then
+    legacy_codex_source="$(
+        sed -n -E 's/^[[:space:]]*CODEX_RATE_SOURCE[[:space:]]*=[[:space:]]*([^#[:space:]]+).*$/\1/p' \
+            "$LEGACY_CODEX_ENV" | tail -n 1 | tr '[:upper:]' '[:lower:]'
+    )"
+fi
+case "$legacy_codex_source" in
+    auto|wham) ;;
+    *) legacy_codex_source=local ;;
+esac
 if [[ ! -e "$CONFIG_FILE" ]]; then
     {
         echo "CODEX=true"
-        echo "CODEX_RATE_SOURCE=local"
+        echo "CODEX_RATE_SOURCE=$legacy_codex_source"
         echo "CLAUDE=true"
         echo "GROK=true"
         echo "GEMINI=true"
@@ -107,14 +118,6 @@ if [[ ! -e "$CONFIG_FILE" ]]; then
     config_file_created=true
 fi
 if ! grep -Eq '^[[:space:]]*CODEX_RATE_SOURCE=' "$CONFIG_FILE"; then
-    legacy_codex_source="$(
-        sed -n -E 's/^[[:space:]]*CODEX_RATE_SOURCE[[:space:]]*=[[:space:]]*([^#[:space:]]+).*$/\1/p' \
-            "$LEGACY_CODEX_ENV" 2>/dev/null | tail -n 1 | tr '[:upper:]' '[:lower:]'
-    )"
-    case "$legacy_codex_source" in
-        auto|wham) ;;
-        *) legacy_codex_source=local ;;
-    esac
     printf '\n# local (default), auto, or wham; auto/wham opt in to network polling.\n' >> "$CONFIG_FILE"
     printf 'CODEX_RATE_SOURCE=%s\n' "$legacy_codex_source" >> "$CONFIG_FILE"
 fi

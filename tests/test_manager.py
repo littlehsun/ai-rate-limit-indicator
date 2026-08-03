@@ -146,6 +146,28 @@ class ManagerTests(unittest.TestCase):
                 config.read_text(encoding="utf-8"),
             )
 
+    def test_install_imports_codex_wham_opt_in_into_new_shared_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, _ = self._environment(root)
+            legacy = root / ".config/codex-rate-indicator/wham.env"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text("CODEX_RATE_SOURCE=wham\n", encoding="utf-8")
+
+            subprocess.run(
+                [MANAGER, "install"],
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            config = root / ".config/rate-limit-indicator/providers.env"
+            self.assertIn(
+                "CODEX_RATE_SOURCE=wham",
+                config.read_text(encoding="utf-8"),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
