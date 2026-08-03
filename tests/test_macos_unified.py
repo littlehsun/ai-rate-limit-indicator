@@ -26,7 +26,7 @@ class UnifiedMacOSTests(unittest.TestCase):
                 encoding="utf-8",
             )
             wham_env.write_text(
-                "CHATGPT_ACCESS_TOKEN=test-token\n",
+                "export CHATGPT_ACCESS_TOKEN=test-token\n",
                 encoding="utf-8",
             )
             fake_python.chmod(0o700)

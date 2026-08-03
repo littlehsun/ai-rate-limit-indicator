@@ -50,6 +50,7 @@ load_wham_environment() {
         key="${line%%=*}"
         value="${line#*=}"
         key="$(printf '%s' "$key" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+        key="$(printf '%s' "$key" | sed -E 's/^export[[:space:]]+//')"
         case "$key" in
             CHATGPT_ACCESS_TOKEN|CHATGPT_BEARER_TOKEN|CODEX_AUTH_FILE|XDG_CACHE_HOME|\
             CODEX_RATE_WHAM_CACHE|CHATGPT_WHAM_USAGE_URL|\
