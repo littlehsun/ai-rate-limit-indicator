@@ -119,6 +119,33 @@ class ManagerTests(unittest.TestCase):
                 individual.read_text(encoding="utf-8"),
             )
 
+    def test_install_preserves_existing_codex_wham_opt_in(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, _ = self._environment(root)
+            config = root / ".config/rate-limit-indicator/providers.env"
+            config.parent.mkdir(parents=True)
+            config.write_text(
+                "CODEX=true\nCLAUDE=false\nGROK=false\nGEMINI=false\n",
+                encoding="utf-8",
+            )
+            legacy = root / ".config/codex-rate-indicator/wham.env"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text("CODEX_RATE_SOURCE=auto\n", encoding="utf-8")
+
+            subprocess.run(
+                [MANAGER, "install"],
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertIn(
+                "CODEX_RATE_SOURCE=auto",
+                config.read_text(encoding="utf-8"),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

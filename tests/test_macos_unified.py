@@ -124,6 +124,8 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn("EnvironmentVariables.GROK_RATE_CACHE", mac_installer)
         self.assertIn("EnvironmentVariables.GROK_RATE_BILLING_URL", mac_installer)
         self.assertIn("CODEX_RATE_SOURCE=local", mac_installer)
+        self.assertIn("LEGACY_CODEX_ENV", mac_installer)
+        self.assertIn('auto|wham) ;;', mac_installer)
         self.assertIn("os.path.realpath(os.path.expanduser(sys.argv[1]))", mac_installer)
         self.assertIn('APP_DIR="$(canonicalize_path "$APP_DIR")"', mac_installer)
         self.assertLess(

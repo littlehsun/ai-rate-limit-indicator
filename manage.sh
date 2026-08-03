@@ -11,6 +11,7 @@ fi
 
 CONFIG_DIR="$REAL_HOME/.config/rate-limit-indicator"
 CONFIG_FILE="${RATE_LIMIT_INDICATOR_CONFIG:-$CONFIG_DIR/providers.env}"
+LEGACY_CODEX_ENV="$REAL_HOME/.config/codex-rate-indicator/wham.env"
 APP_DIR="$REAL_HOME/.local/share/rate-limit-indicator"
 INSTALLED_SCRIPT="$APP_DIR/manage.sh"
 BIN="$REAL_HOME/.local/bin/rate-limit-indicators"
@@ -53,8 +54,9 @@ read_enabled() {
 
 read_config_value() {
     local key="$1"
+    local file="${2:-$CONFIG_FILE}"
     sed -n -E "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*([^#[:space:]]+).*$/\\1/p" \
-        "$CONFIG_FILE" 2>/dev/null | tail -n 1 | tr '[:upper:]' '[:lower:]'
+        "$file" 2>/dev/null | tail -n 1 | tr '[:upper:]' '[:lower:]'
 }
 
 timer_enabled_for_provider() {
@@ -174,8 +176,13 @@ install_manager() {
         } > "$CONFIG_FILE"
     fi
     if ! grep -Eq '^[[:space:]]*CODEX_RATE_SOURCE=' "$CONFIG_FILE"; then
+        legacy_codex_source="$(read_config_value CODEX_RATE_SOURCE "$LEGACY_CODEX_ENV")"
+        case "$legacy_codex_source" in
+            auto|wham) ;;
+            *) legacy_codex_source=local ;;
+        esac
         printf '\n# local (default), auto, or wham; auto/wham opt in to network polling.\n' >> "$CONFIG_FILE"
-        printf 'CODEX_RATE_SOURCE=local\n' >> "$CONFIG_FILE"
+        printf 'CODEX_RATE_SOURCE=%s\n' "$legacy_codex_source" >> "$CONFIG_FILE"
     fi
     if ! grep -q '^DISPLAY_MODE=' "$CONFIG_FILE"; then
         legacy_display="$(

@@ -16,6 +16,7 @@ GROK_RATE_BILLING_URL_OVERRIDE="${GROK_RATE_BILLING_URL:-}"
 LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
 LOG_DIR="$HOME/Library/Logs/RateLimitIndicator"
 LEGACY_CODEX_PLIST="$LAUNCH_AGENTS/com.hsun.codex-rate-menubar.plist"
+LEGACY_CODEX_ENV="$HOME/.config/codex-rate-indicator/wham.env"
 LEGACY_LOGIN_MIGRATION_MARKER="$APP_SUPPORT/migrate-legacy-launch-at-login"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -102,8 +103,16 @@ if [[ ! -e "$CONFIG_FILE" ]]; then
     config_file_created=true
 fi
 if ! grep -Eq '^[[:space:]]*CODEX_RATE_SOURCE=' "$CONFIG_FILE"; then
+    legacy_codex_source="$(
+        sed -n -E 's/^[[:space:]]*CODEX_RATE_SOURCE[[:space:]]*=[[:space:]]*([^#[:space:]]+).*$/\1/p' \
+            "$LEGACY_CODEX_ENV" 2>/dev/null | tail -n 1 | tr '[:upper:]' '[:lower:]'
+    )"
+    case "$legacy_codex_source" in
+        auto|wham) ;;
+        *) legacy_codex_source=local ;;
+    esac
     printf '\n# local (default), auto, or wham; auto/wham opt in to network polling.\n' >> "$CONFIG_FILE"
-    printf 'CODEX_RATE_SOURCE=local\n' >> "$CONFIG_FILE"
+    printf 'CODEX_RATE_SOURCE=%s\n' "$legacy_codex_source" >> "$CONFIG_FILE"
 fi
 if [[ "$config_file_created" == true || "$CONFIG_FILE" == "$DEFAULT_CONFIG_FILE" ]]; then
     chmod 600 "$CONFIG_FILE"
