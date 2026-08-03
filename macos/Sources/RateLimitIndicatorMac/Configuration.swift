@@ -54,11 +54,19 @@ enum ConfigurationStore {
                 parts[1].trimmingCharacters(in: .whitespaces)
         }
 
-        let mode = DisplayMode(rawValue: values["DISPLAY_MODE"]?.lowercased() ?? "") ?? .auto
+        let configuredMode = DisplayMode(
+            rawValue: values["DISPLAY_MODE"]?.lowercased() ?? ""
+        )
+        let legacyProvider = values["DISPLAY_PROVIDER"]?.lowercased()
+        let validLegacyProvider = legacyProvider.flatMap {
+            ProviderCatalog.order.contains($0) ? $0 : nil
+        }
+        let mode = configuredMode ?? (validLegacyProvider == nil ? .auto : .custom)
         let enabled = ProviderCatalog.order.filter {
             ["1", "true", "yes", "on"].contains(values[$0.uppercased()]?.lowercased() ?? "")
         }
-        let indicator = (providers(from: values["DISPLAY_PROVIDERS"]) ?? enabled)
+        let legacyIndicator = validLegacyProvider.map { [$0] }
+        let indicator = (providers(from: values["DISPLAY_PROVIDERS"]) ?? legacyIndicator ?? enabled)
             .filter(enabled.contains)
         let dropdown = (providers(from: values["DROPDOWN_PROVIDERS"]) ?? enabled)
             .filter(enabled.contains)

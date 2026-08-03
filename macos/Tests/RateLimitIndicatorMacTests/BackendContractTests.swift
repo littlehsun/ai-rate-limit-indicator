@@ -131,6 +131,29 @@ final class BackendContractTests: XCTestCase {
         XCTAssertEqual(configuration.enabledProviderOrder, ["grok"])
     }
 
+    func testConfigurationHonorsLegacyDisplayProvider() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let url = directory.appendingPathComponent("providers.env")
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try """
+        CODEX=false
+        CLAUDE=false
+        GROK=true
+        GEMINI=false
+        DISPLAY_PROVIDER=grok
+        """.write(to: url, atomically: true, encoding: .utf8)
+
+        let configuration = ConfigurationStore.load(from: url)
+
+        XCTAssertEqual(configuration.mode, .custom)
+        XCTAssertEqual(configuration.indicatorProviders, ["grok"])
+    }
+
     func testMissingConfigurationHasNoEnabledProviders() {
         let missing = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
