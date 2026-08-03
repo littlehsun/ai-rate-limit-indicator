@@ -203,9 +203,7 @@ private struct ProviderStatusLabel: View {
                         .foregroundStyle(UsageColor.color(for: window.usedPercent))
                         .monospacedDigit()
                 }
-                if let constrained = snapshot.windows.prefix(2).max(by: {
-                    $0.usedPercent < $1.usedPercent
-                }) {
+                if let constrained = snapshot.indicatorResetWindow {
                     Text("⟳\(UsageFormatting.countdown(to: constrained.resetsAt))")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()

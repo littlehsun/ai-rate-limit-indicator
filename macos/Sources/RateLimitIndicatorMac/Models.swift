@@ -13,6 +13,13 @@ struct UsageWindow: Codable, Identifiable, Hashable {
             || normalized == "weekly"
             || normalized.hasSuffix("-7d")
     }
+
+    var quotaCadenceRank: Int {
+        let normalized = id.lowercased()
+        if isSevenDay || normalized.hasSuffix("-weekly") { return 1 }
+        if normalized == "monthly" || normalized.hasSuffix("-monthly") { return 2 }
+        return 0
+    }
 }
 
 struct ProviderSnapshot: Codable, Identifiable, Hashable {
@@ -32,6 +39,12 @@ struct ProviderSnapshot: Codable, Identifiable, Hashable {
 
     var sevenDayPercent: Int? {
         windows.first(where: \.isSevenDay)?.usedPercent
+    }
+
+    var indicatorResetWindow: UsageWindow? {
+        windows.prefix(2).min {
+            $0.quotaCadenceRank < $1.quotaCadenceRank
+        }
     }
 }
 

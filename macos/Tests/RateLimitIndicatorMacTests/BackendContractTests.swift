@@ -47,6 +47,39 @@ final class BackendContractTests: XCTestCase {
         XCTAssertEqual(selected?.provider, "codex")
     }
 
+    func testIndicatorResetUsesShortestQuotaWindow() {
+        let fiveHour = UsageWindow(
+            id: "5h",
+            label: "5H",
+            usedPercent: 10,
+            resetsAt: 100,
+            detail: nil
+        )
+        let weekly = UsageWindow(
+            id: "7d",
+            label: "7D",
+            usedPercent: 80,
+            resetsAt: 200,
+            detail: nil
+        )
+        let monthly = UsageWindow(
+            id: "monthly",
+            label: "Monthly",
+            usedPercent: 90,
+            resetsAt: 300,
+            detail: nil
+        )
+
+        XCTAssertEqual(
+            snapshot(provider: "codex", windows: [weekly, fiveHour]).indicatorResetWindow,
+            fiveHour
+        )
+        XCTAssertEqual(
+            snapshot(provider: "grok", windows: [monthly, weekly]).indicatorResetWindow,
+            weekly
+        )
+    }
+
     private func snapshot(
         provider: String,
         percent: Int,
@@ -65,6 +98,21 @@ final class BackendContractTests: XCTestCase {
                     detail: nil
                 ),
             ],
+            status: "fresh",
+            error: nil,
+            extras: []
+        )
+    }
+
+    private func snapshot(
+        provider: String,
+        windows: [UsageWindow]
+    ) -> ProviderSnapshot {
+        ProviderSnapshot(
+            provider: provider,
+            label: ProviderCatalog.label(for: provider),
+            updatedAt: nil,
+            windows: windows,
             status: "fresh",
             error: nil,
             extras: []

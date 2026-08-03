@@ -38,6 +38,9 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn("macos|codex-macos", root_installer)
         self.assertIn("LSUIElement", mac_installer)
         self.assertIn("poll-provider.sh", mac_installer)
+        self.assertIn("com.hsun.codex-rate-menubar", mac_installer)
+        self.assertIn('launchctl bootout "gui/$UID/com.hsun.codex-rate-menubar"', mac_installer)
+        self.assertIn('rm -f "$LEGACY_CODEX_PLIST"', mac_installer)
 
     def test_menu_panel_has_intrinsic_content_and_recoverable_empty_state(self):
         views = (
@@ -68,6 +71,7 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn("logo.draw(", views)
         self.assertIn("NSColor.labelColor.withAlphaComponent(0.65)", views)
         self.assertIn("snapshot.windows.first(where: \\.isSevenDay)", views)
+        self.assertIn("snapshot.indicatorResetWindow", views)
         self.assertIn('snapshot.status == "stale" ? "~" : ""', views)
 
 
