@@ -113,6 +113,11 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn("EnvironmentVariables.RATE_LIMIT_INDICATOR_PYTHON", mac_installer)
         self.assertIn("CODEX_RATE_SOURCE=local", mac_installer)
         self.assertIn("os.path.realpath(os.path.expanduser(sys.argv[1]))", mac_installer)
+        self.assertIn('APP_DIR="$(canonicalize_path "$APP_DIR")"', mac_installer)
+        self.assertLess(
+            mac_installer.index('APP_DIR="$(canonicalize_path "$APP_DIR")"'),
+            mac_installer.index('APP_EXECUTABLE="$APP_DIR/Contents/MacOS/RateLimitIndicatorMac"'),
+        )
         self.assertIn('config_dir_created=false', mac_installer)
         self.assertIn(
             '"$config_dir_created" == true && "$CONFIG_FILE" == "$DEFAULT_CONFIG_FILE"',

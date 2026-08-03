@@ -8,8 +8,6 @@ BACKEND_DIR="$APP_SUPPORT/backend"
 COLLECTOR_DIR="$BACKEND_DIR/collectors"
 ASSET_DIR="$APP_SUPPORT/assets"
 APP_DIR="${RATE_LIMIT_INDICATOR_APP_DIR:-$HOME/Applications/Rate Limit Indicator.app}"
-APP_EXECUTABLE="$APP_DIR/Contents/MacOS/RateLimitIndicatorMac"
-STAGED_APP_EXECUTABLE="$APP_DIR/Contents/MacOS/.RateLimitIndicatorMac.new"
 DEFAULT_CONFIG_FILE="$HOME/.config/rate-limit-indicator/providers.env"
 CONFIG_FILE="${RATE_LIMIT_INDICATOR_CONFIG:-$DEFAULT_CONFIG_FILE}"
 LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
@@ -38,6 +36,9 @@ if [[ "$PYTHON_BIN" != /* || ! -x "$PYTHON_BIN" ]]; then
     echo "python3 must resolve to an executable absolute path: $PYTHON_BIN" >&2
     exit 1
 fi
+APP_DIR="$(canonicalize_path "$APP_DIR")"
+APP_EXECUTABLE="$APP_DIR/Contents/MacOS/RateLimitIndicatorMac"
+STAGED_APP_EXECUTABLE="$APP_DIR/Contents/MacOS/.RateLimitIndicatorMac.new"
 DEFAULT_CONFIG_FILE="$(canonicalize_path "$DEFAULT_CONFIG_FILE")"
 CONFIG_FILE="$(canonicalize_path "$CONFIG_FILE")"
 CONFIG_DIR="$(dirname "$CONFIG_FILE")"
