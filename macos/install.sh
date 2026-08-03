@@ -184,22 +184,22 @@ else
 fi
 
 app_was_running=false
-if pgrep -x RateLimitIndicatorMac >/dev/null 2>&1; then
+if pgrep -u "$UID" -x RateLimitIndicatorMac >/dev/null 2>&1; then
     app_was_running=true
     osascript -e 'tell application id "com.hsun.rate-limit-indicator" to quit' \
         >/dev/null 2>&1 || true
     for _ in {1..20}; do
-        pgrep -x RateLimitIndicatorMac >/dev/null 2>&1 || break
+        pgrep -u "$UID" -x RateLimitIndicatorMac >/dev/null 2>&1 || break
         sleep 0.25
     done
-    if pgrep -x RateLimitIndicatorMac >/dev/null 2>&1; then
-        pkill -x RateLimitIndicatorMac 2>/dev/null || true
+    if pgrep -u "$UID" -x RateLimitIndicatorMac >/dev/null 2>&1; then
+        pkill -u "$UID" -x RateLimitIndicatorMac 2>/dev/null || true
     fi
     for _ in {1..20}; do
-        pgrep -x RateLimitIndicatorMac >/dev/null 2>&1 || break
+        pgrep -u "$UID" -x RateLimitIndicatorMac >/dev/null 2>&1 || break
         sleep 0.25
     done
-    if pgrep -x RateLimitIndicatorMac >/dev/null 2>&1; then
+    if pgrep -u "$UID" -x RateLimitIndicatorMac >/dev/null 2>&1; then
         echo "Could not stop the running Rate Limit Indicator app." >&2
         exit 1
     fi
