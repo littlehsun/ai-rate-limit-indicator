@@ -88,11 +88,16 @@ final class AppModel: ObservableObject {
     }
 
     func moveProvider(_ provider: String, offset: Int) {
-        guard let source = configuration.providerOrder.firstIndex(of: provider) else { return }
+        let enabledOrder = configuration.enabledProviderOrder
+        guard let source = enabledOrder.firstIndex(of: provider) else { return }
         let destination = source + offset
-        guard configuration.providerOrder.indices.contains(destination) else { return }
+        guard enabledOrder.indices.contains(destination),
+              let sourceIndex = configuration.providerOrder.firstIndex(of: provider),
+              let destinationIndex = configuration.providerOrder.firstIndex(
+                  of: enabledOrder[destination]
+              ) else { return }
         updateConfiguration { configuration in
-            configuration.providerOrder.swapAt(source, destination)
+            configuration.providerOrder.swapAt(sourceIndex, destinationIndex)
         }
     }
 

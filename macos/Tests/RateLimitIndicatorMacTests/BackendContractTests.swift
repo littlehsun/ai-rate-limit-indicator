@@ -47,6 +47,52 @@ final class BackendContractTests: XCTestCase {
         XCTAssertEqual(selected?.provider, "codex")
     }
 
+    func testAutoSelectionSurvivesStaleSnapshots() {
+        let selector = AutoDisplaySelector()
+        _ = selector.choose(from: [
+            snapshot(provider: "codex", percent: 20, updatedAt: "2026-07-30T05:00:00Z"),
+            snapshot(provider: "grok", percent: 40, updatedAt: "2026-07-30T05:01:00Z"),
+        ])
+        let fresh = [
+            snapshot(provider: "codex", percent: 30, updatedAt: "2026-07-30T05:02:00Z"),
+            snapshot(provider: "grok", percent: 41, updatedAt: "2026-07-30T05:03:00Z"),
+        ]
+        XCTAssertEqual(selector.choose(from: fresh)?.provider, "codex")
+
+        XCTAssertEqual(
+            selector.choose(from: fresh.map { $0.markingStale() })?.provider,
+            "codex"
+        )
+        XCTAssertEqual(selector.choose(from: fresh)?.provider, "codex")
+    }
+
+    func testConfigurationFiltersDisabledProviders() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let url = directory.appendingPathComponent("providers.env")
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try """
+        CODEX=false
+        CLAUDE=false
+        GROK=true
+        GEMINI=false
+        DISPLAY_PROVIDERS=codex,grok
+        DROPDOWN_PROVIDERS=codex,grok
+        PROVIDER_ORDER=codex,grok,gemini,claude
+        """.write(to: url, atomically: true, encoding: .utf8)
+
+        let configuration = ConfigurationStore.load(from: url)
+
+        XCTAssertEqual(configuration.enabledProviders, ["grok"])
+        XCTAssertEqual(configuration.indicatorProviders, ["grok"])
+        XCTAssertEqual(configuration.dropdownProviders, ["grok"])
+        XCTAssertEqual(configuration.enabledProviderOrder, ["grok"])
+    }
+
     func testIndicatorResetUsesShortestQuotaWindow() {
         let fiveHour = UsageWindow(
             id: "5h",

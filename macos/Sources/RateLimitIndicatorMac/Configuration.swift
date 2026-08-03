@@ -9,12 +9,14 @@ enum DisplayMode: String, CaseIterable, Identifiable {
 
 struct DisplayConfiguration: Equatable {
     var mode: DisplayMode
+    var enabledProviders: [String]
     var indicatorProviders: [String]
     var dropdownProviders: [String]
     var providerOrder: [String]
 
     static let defaults = DisplayConfiguration(
         mode: .auto,
+        enabledProviders: ProviderCatalog.order,
         indicatorProviders: ProviderCatalog.order,
         dropdownProviders: ProviderCatalog.order,
         providerOrder: ProviderCatalog.order
@@ -23,6 +25,10 @@ struct DisplayConfiguration: Equatable {
     func ordered(_ providers: [String]) -> [String] {
         let selected = Set(providers)
         return providerOrder.filter(selected.contains)
+    }
+
+    var enabledProviderOrder: [String] {
+        providerOrder.filter(enabledProviders.contains)
     }
 }
 
@@ -44,14 +50,17 @@ enum ConfigurationStore {
         let enabled = ProviderCatalog.order.filter {
             ["1", "true", "yes", "on"].contains(values[$0.uppercased()]?.lowercased() ?? "")
         }
-        let indicator = providers(from: values["DISPLAY_PROVIDERS"]) ?? enabled
-        let dropdown = providers(from: values["DROPDOWN_PROVIDERS"]) ?? enabled
+        let indicator = (providers(from: values["DISPLAY_PROVIDERS"]) ?? enabled)
+            .filter(enabled.contains)
+        let dropdown = (providers(from: values["DROPDOWN_PROVIDERS"]) ?? enabled)
+            .filter(enabled.contains)
         var order = providers(from: values["PROVIDER_ORDER"]) ?? []
         for provider in indicator + dropdown + ProviderCatalog.order where !order.contains(provider) {
             order.append(provider)
         }
         return DisplayConfiguration(
             mode: mode,
+            enabledProviders: enabled,
             indicatorProviders: indicator,
             dropdownProviders: dropdown,
             providerOrder: order

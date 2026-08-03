@@ -468,7 +468,7 @@ struct SettingsView: View {
                 LabeledContent("Display order") {
                     VStack(alignment: .trailing, spacing: 6) {
                         ForEach(
-                            Array(model.configuration.providerOrder.enumerated()),
+                            Array(model.configuration.enabledProviderOrder.enumerated()),
                             id: \.element
                         ) { index, provider in
                             HStack(spacing: 6) {
@@ -487,7 +487,7 @@ struct SettingsView: View {
                                 } label: {
                                     Image(systemName: "chevron.down")
                                 }
-                                .disabled(index == model.configuration.providerOrder.count - 1)
+                                .disabled(index == model.configuration.enabledProviderOrder.count - 1)
                                 .accessibilityLabel("Move \(ProviderCatalog.label(for: provider)) down")
                             }
                             .frame(width: 270)
@@ -497,7 +497,11 @@ struct SettingsView: View {
             } header: {
                 Text("Providers")
             } footer: {
-                Text("Menu panel controls the provider sections shown after clicking the menu bar item.")
+                if model.configuration.enabledProviders.isEmpty {
+                    Text("No data sources are enabled. Enable a provider flag in the configuration file first.")
+                } else {
+                    Text("Menu panel controls the provider sections shown after clicking the menu bar item.")
+                }
             }
 
             Section("Startup") {
@@ -531,7 +535,7 @@ struct SettingsView: View {
     ) -> some View {
         LabeledContent(title) {
             Menu {
-                ForEach(model.configuration.providerOrder, id: \.self) { provider in
+                ForEach(model.configuration.enabledProviderOrder, id: \.self) { provider in
                     Button {
                         toggle(provider)
                     } label: {
@@ -561,11 +565,11 @@ struct SettingsView: View {
     }
 
     private func providerSummary(_ providers: [String]) -> String {
-        let ordered = model.configuration.providerOrder.filter(providers.contains)
+        let ordered = model.configuration.enabledProviderOrder.filter(providers.contains)
         if ordered.isEmpty {
             return "None"
         }
-        if ordered.count == ProviderCatalog.order.count {
+        if ordered.count == model.configuration.enabledProviders.count {
             return "All providers"
         }
         return ordered.map(ProviderCatalog.label(for:)).joined(separator: ", ")

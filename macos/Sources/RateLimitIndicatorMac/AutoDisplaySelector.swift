@@ -12,7 +12,10 @@ final class AutoDisplaySelector {
             return (snapshot, value, updatedTimestamp(snapshot.updatedAt))
         }
         guard !eligible.isEmpty else {
-            selectedProvider = nil
+            if let selectedProvider,
+               let retained = snapshots.first(where: { $0.provider == selectedProvider }) {
+                return retained
+            }
             let candidates = snapshots.filter { $0.status == "fresh" }
             return (candidates.isEmpty ? snapshots : candidates)
                 .max { updatedTimestamp($0.updatedAt) < updatedTimestamp($1.updatedAt) }
