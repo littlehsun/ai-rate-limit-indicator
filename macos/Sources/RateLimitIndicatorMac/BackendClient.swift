@@ -20,18 +20,22 @@ enum BackendError: LocalizedError {
 struct BackendClient {
     let cliURL: URL
     let configURL: URL
+    let pythonURL: URL
 
     init(
         cliURL: URL = BackendPaths.cliURL,
-        configURL: URL = BackendPaths.configURL
+        configURL: URL = BackendPaths.configURL,
+        pythonURL: URL = BackendPaths.pythonURL
     ) {
         self.cliURL = cliURL
         self.configURL = configURL
+        self.pythonURL = pythonURL
     }
 
     func fetchSnapshots() async throws -> [ProviderSnapshot] {
         let cliURL = self.cliURL
         let configURL = self.configURL
+        let pythonURL = self.pythonURL
         return try await Task.detached(priority: .utility) {
             guard FileManager.default.fileExists(atPath: cliURL.path) else {
                 throw BackendError.missingCLI(cliURL.path)
@@ -40,8 +44,8 @@ struct BackendClient {
             let process = Process()
             let standardOutput = Pipe()
             let standardError = Pipe()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = ["python3", cliURL.path, "--json"]
+            process.executableURL = pythonURL
+            process.arguments = [cliURL.path, "--json"]
             var environment = ProcessInfo.processInfo.environment
             environment["RATE_LIMIT_INDICATOR_CONFIG"] = configURL.path
             process.environment = environment
@@ -84,6 +88,14 @@ enum BackendPaths {
     static let assetsURL = appSupportURL.appendingPathComponent("assets", isDirectory: true)
     static let legacyLoginMigrationMarkerURL = appSupportURL
         .appendingPathComponent("migrate-legacy-launch-at-login")
+    static var pythonURL: URL {
+        resolvePythonURL(
+            environment: ProcessInfo.processInfo.environment,
+            embeddedPath: Bundle.main.object(
+                forInfoDictionaryKey: "RateLimitIndicatorPythonPath"
+            ) as? String
+        )
+    }
     static var configURL: URL {
         resolveConfigURL(
             environment: ProcessInfo.processInfo.environment,
@@ -105,5 +117,18 @@ enum BackendPaths {
         }
         return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config/rate-limit-indicator/providers.env")
+    }
+
+    static func resolvePythonURL(
+        environment: [String: String],
+        embeddedPath: String?
+    ) -> URL {
+        if let path = environment["RATE_LIMIT_INDICATOR_PYTHON"], !path.isEmpty {
+            return URL(fileURLWithPath: path)
+        }
+        if let path = embeddedPath, !path.isEmpty {
+            return URL(fileURLWithPath: path)
+        }
+        return URL(fileURLWithPath: "/usr/bin/python3")
     }
 }

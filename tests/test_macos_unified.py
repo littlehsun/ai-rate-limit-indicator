@@ -52,7 +52,9 @@ class UnifiedMacOSTests(unittest.TestCase):
         )
         self.assertIn('rm -f "$LEGACY_CODEX_PLIST"', mac_installer)
         self.assertIn("RateLimitIndicatorConfigPath", mac_installer)
+        self.assertIn("RateLimitIndicatorPythonPath", mac_installer)
         self.assertIn("EnvironmentVariables.RATE_LIMIT_INDICATOR_CONFIG", mac_installer)
+        self.assertIn("EnvironmentVariables.RATE_LIMIT_INDICATOR_PYTHON", mac_installer)
         self.assertIn("os.path.realpath(os.path.expanduser(sys.argv[1]))", mac_installer)
         self.assertIn('config_dir_created=false', mac_installer)
         self.assertIn(

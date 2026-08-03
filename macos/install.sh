@@ -32,6 +32,11 @@ fi
 canonicalize_path() {
     python3 -c 'import os, sys; print(os.path.realpath(os.path.expanduser(sys.argv[1])))' "$1"
 }
+PYTHON_BIN="$(command -v python3)"
+if [[ "$PYTHON_BIN" != /* || ! -x "$PYTHON_BIN" ]]; then
+    echo "python3 must resolve to an executable absolute path: $PYTHON_BIN" >&2
+    exit 1
+fi
 DEFAULT_CONFIG_FILE="$(canonicalize_path "$DEFAULT_CONFIG_FILE")"
 CONFIG_FILE="$(canonicalize_path "$CONFIG_FILE")"
 CONFIG_DIR="$(dirname "$CONFIG_FILE")"
@@ -125,6 +130,8 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
 PLIST
 /usr/bin/plutil -insert RateLimitIndicatorConfigPath -string "$CONFIG_FILE" \
     "$APP_DIR/Contents/Info.plist"
+/usr/bin/plutil -insert RateLimitIndicatorPythonPath -string "$PYTHON_BIN" \
+    "$APP_DIR/Contents/Info.plist"
 
 echo "[4/5] Installing Codex and Grok polling LaunchAgents..."
 mkdir -p "$LAUNCH_AGENTS" "$LOG_DIR"
@@ -159,6 +166,8 @@ PLIST
     /usr/bin/plutil -insert EnvironmentVariables -dictionary "$plist"
     /usr/bin/plutil -insert EnvironmentVariables.RATE_LIMIT_INDICATOR_CONFIG \
         -string "$CONFIG_FILE" "$plist"
+    /usr/bin/plutil -insert EnvironmentVariables.RATE_LIMIT_INDICATOR_PYTHON \
+        -string "$PYTHON_BIN" "$plist"
     launchctl bootout "gui/$UID" "$plist" 2>/dev/null || true
     launchctl bootstrap "gui/$UID" "$plist"
 done

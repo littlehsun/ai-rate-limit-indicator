@@ -226,6 +226,20 @@ final class BackendContractTests: XCTestCase {
         XCTAssertEqual(overridden.path, "/tmp/override.env")
     }
 
+    func testInstalledPythonPathResolution() {
+        let embedded = BackendPaths.resolvePythonURL(
+            environment: [:],
+            embeddedPath: "/opt/homebrew/bin/python3"
+        )
+        let overridden = BackendPaths.resolvePythonURL(
+            environment: ["RATE_LIMIT_INDICATOR_PYTHON": "/custom/python3"],
+            embeddedPath: "/opt/homebrew/bin/python3"
+        )
+
+        XCTAssertEqual(embedded.path, "/opt/homebrew/bin/python3")
+        XCTAssertEqual(overridden.path, "/custom/python3")
+    }
+
     func testSevenDayPercentUsesLargestMatchingWindow() {
         let snapshot = snapshot(
             provider: "gemini",
