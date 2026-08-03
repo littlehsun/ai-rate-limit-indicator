@@ -130,8 +130,11 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn("legacy_login_was_enabled=true", mac_installer)
         self.assertIn("migrate-legacy-launch-at-login", mac_installer)
         self.assertIn("STAGED_APP_EXECUTABLE", mac_installer)
-        self.assertIn('pgrep -u "$UID" -f -x "$APP_EXECUTABLE"', mac_installer)
-        self.assertIn('pkill -u "$UID" -f -x "$APP_EXECUTABLE"', mac_installer)
+        self.assertIn('ps -U "$UID" -ww -o pid=', mac_installer)
+        self.assertIn('[[ "$command" == "$APP_EXECUTABLE" ]]', mac_installer)
+        self.assertIn('done < <(app_process_ids)', mac_installer)
+        self.assertNotIn('pgrep -u "$UID"', mac_installer)
+        self.assertNotIn('pkill -u "$UID"', mac_installer)
         self.assertIn('mv -f "$STAGED_APP_EXECUTABLE" "$APP_EXECUTABLE"', mac_installer)
         self.assertIn('if [[ "$app_was_running" == true ]]', mac_installer)
         self.assertLess(

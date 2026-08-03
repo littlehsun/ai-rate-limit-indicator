@@ -190,8 +190,18 @@ else
 fi
 
 app_was_running=false
+app_process_ids() {
+    local pid
+    local command
+    ps -U "$UID" -ww -o pid= 2>/dev/null | while read -r pid; do
+        command="$(ps -ww -p "$pid" -o command= 2>/dev/null || true)"
+        if [[ "$command" == "$APP_EXECUTABLE" ]]; then
+            printf '%s\n' "$pid"
+        fi
+    done
+}
 app_is_running() {
-    pgrep -u "$UID" -f -x "$APP_EXECUTABLE" >/dev/null 2>&1
+    [[ -n "$(app_process_ids)" ]]
 }
 if app_is_running; then
     app_was_running=true
@@ -202,7 +212,9 @@ if app_is_running; then
         sleep 0.25
     done
     if app_is_running; then
-        pkill -u "$UID" -f -x "$APP_EXECUTABLE" 2>/dev/null || true
+        while read -r pid; do
+            kill "$pid" 2>/dev/null || true
+        done < <(app_process_ids)
     fi
     for _ in {1..20}; do
         app_is_running || break
