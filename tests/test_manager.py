@@ -193,7 +193,7 @@ class ManagerTests(unittest.TestCase):
             config = root / ".config/rate-limit-indicator/providers.env"
             config.parent.mkdir(parents=True)
             config.write_text(
-                "CODEX=true\nCODEX_RATE_SOURCE = auto\n"
+                "CODEX=true\nexport CODEX_RATE_SOURCE = auto\n"
                 "CLAUDE=false\nGROK=false\nGEMINI=false\n",
                 encoding="utf-8",
             )
@@ -207,7 +207,7 @@ class ManagerTests(unittest.TestCase):
             )
 
             contents = config.read_text(encoding="utf-8")
-            self.assertIn("CODEX_RATE_SOURCE = auto", contents)
+            self.assertIn("export CODEX_RATE_SOURCE = auto", contents)
             self.assertEqual(contents.count("CODEX_RATE_SOURCE"), 1)
 
 
