@@ -11,7 +11,6 @@ APP_DIR="${RATE_LIMIT_INDICATOR_APP_DIR:-$HOME/Applications/Rate Limit Indicator
 APP_EXECUTABLE="$APP_DIR/Contents/MacOS/RateLimitIndicatorMac"
 DEFAULT_CONFIG_FILE="$HOME/.config/rate-limit-indicator/providers.env"
 CONFIG_FILE="${RATE_LIMIT_INDICATOR_CONFIG:-$DEFAULT_CONFIG_FILE}"
-CONFIG_DIR="$(dirname "$CONFIG_FILE")"
 LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
 LOG_DIR="$HOME/Library/Logs/RateLimitIndicator"
 LEGACY_CODEX_PLIST="$LAUNCH_AGENTS/com.hsun.codex-rate-menubar.plist"
@@ -29,6 +28,12 @@ if ! command -v python3 >/dev/null 2>&1; then
     echo "python3 is required for the shared provider backend." >&2
     exit 1
 fi
+canonicalize_path() {
+    python3 -c 'import os, sys; print(os.path.realpath(os.path.expanduser(sys.argv[1])))' "$1"
+}
+DEFAULT_CONFIG_FILE="$(canonicalize_path "$DEFAULT_CONFIG_FILE")"
+CONFIG_FILE="$(canonicalize_path "$CONFIG_FILE")"
+CONFIG_DIR="$(dirname "$CONFIG_FILE")"
 
 echo "=== Unified Rate Limit Indicator for macOS ==="
 echo "Removing the legacy Codex menu-bar LaunchAgent..."
