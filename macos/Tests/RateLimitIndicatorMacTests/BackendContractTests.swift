@@ -234,6 +234,17 @@ final class BackendContractTests: XCTestCase {
         )
 
         XCTAssertEqual(snapshot.sevenDayPercent, 47)
+        XCTAssertTrue(snapshot.indicatorDisplayWindows.contains {
+            $0.id == "claude-gpt-7d"
+        })
+        XCTAssertLessThanOrEqual(snapshot.indicatorDisplayWindows.count, 2)
+    }
+
+    func testLoginApprovalErrorExplainsRecovery() {
+        XCTAssertTrue(
+            LaunchAtLoginError.approvalRequired.localizedDescription
+                .contains("System Settings")
+        )
     }
 
     @MainActor

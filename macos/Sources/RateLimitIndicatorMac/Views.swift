@@ -150,7 +150,10 @@ private enum MenuBarCompositeImage {
     }
 
     private static func primaryWindow(_ snapshot: ProviderSnapshot) -> UsageWindow? {
-        snapshot.windows.first(where: \.isSevenDay) ?? snapshot.windows.first
+        snapshot.windows
+            .filter(\.isSevenDay)
+            .max(by: { $0.usedPercent < $1.usedPercent })
+            ?? snapshot.windows.first
     }
 
     private static func providerImage(_ provider: String) -> NSImage? {
@@ -194,7 +197,7 @@ private struct ProviderStatusLabel: View {
                 Text("--")
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(Array(snapshot.windows.prefix(2).enumerated()), id: \.element.id) { index, window in
+                ForEach(Array(snapshot.indicatorDisplayWindows.enumerated()), id: \.element.id) { index, window in
                     if index > 0 {
                         Text("|")
                             .foregroundStyle(.gray)
@@ -228,6 +231,13 @@ struct MenuContentView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if let migrationError = LaunchAtLoginManager.migrationErrorMessage {
+                Text(migrationError)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .padding()
+            }
+
             if let error = model.errorMessage, model.snapshots.isEmpty {
                 Text(error)
                     .font(.callout)
@@ -423,7 +433,7 @@ private struct InfoLine: View {
 struct SettingsView: View {
     @ObservedObject var model: AppModel
     @State private var launchAtLogin = LaunchAtLoginManager.isEnabled
-    @State private var launchError: String?
+    @State private var launchError: String? = LaunchAtLoginManager.migrationErrorMessage
 
     var body: some View {
         Form {

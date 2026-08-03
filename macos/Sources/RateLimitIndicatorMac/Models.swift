@@ -47,6 +47,22 @@ struct ProviderSnapshot: Codable, Identifiable, Hashable {
         }
     }
 
+    var indicatorDisplayWindows: [UsageWindow] {
+        var displayed = Array(windows.prefix(2))
+        guard let strongestSevenDay = windows
+            .filter(\.isSevenDay)
+            .max(by: { $0.usedPercent < $1.usedPercent }),
+              !displayed.contains(strongestSevenDay) else {
+            return displayed
+        }
+        if displayed.count < 2 {
+            displayed.append(strongestSevenDay)
+        } else {
+            displayed[displayed.count - 1] = strongestSevenDay
+        }
+        return displayed
+    }
+
     func markingStale() -> ProviderSnapshot {
         ProviderSnapshot(
             provider: provider,

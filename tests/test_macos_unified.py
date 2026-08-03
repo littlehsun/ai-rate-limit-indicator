@@ -21,6 +21,8 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn('unified-indicator/adapters.py', installer)
         self.assertIn("retireLegacyAgent()", launch_manager)
         self.assertIn("com.hsun.codex-rate-menubar.plist", launch_manager)
+        self.assertIn("migrationErrorMessage", launch_manager)
+        self.assertIn("case .requiresApproval:", launch_manager)
 
     def test_swift_ui_does_not_duplicate_provider_api_endpoints(self):
         source = "\n".join(
@@ -124,8 +126,10 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn("MenuBarCompositeImage.make(for: snapshots)", views)
         self.assertIn("logo.draw(", views)
         self.assertIn("NSColor.labelColor.withAlphaComponent(0.65)", views)
-        self.assertIn("snapshot.windows.first(where: \\.isSevenDay)", views)
+        self.assertIn(".filter(\\.isSevenDay)", views)
+        self.assertIn(".max(by: { $0.usedPercent < $1.usedPercent })", views)
         self.assertIn("snapshot.indicatorResetWindow", views)
+        self.assertIn("snapshot.indicatorDisplayWindows", views)
         self.assertIn('snapshot.status == "stale" ? "~" : ""', views)
 
 
