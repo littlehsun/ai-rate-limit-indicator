@@ -145,8 +145,11 @@ class AdapterTests(unittest.TestCase):
             ):
                 snapshot = load_codex()
 
+        expected_expiration = datetime.fromisoformat(
+            "2026-08-12T18:12:36.625939+00:00"
+        ).astimezone().strftime("%Y-%m-%d %H:%M")
         self.assertEqual(snapshot.extras[0], "Reset credits: 1")
-        self.assertIn("1. expires 2026-08-13", snapshot.extras[1])
+        self.assertEqual(snapshot.extras[1], f"1. expires {expected_expiration}")
 
     def test_codex_adapter_keeps_reset_credit_row_when_api_has_no_data(self):
         class Snapshot:
