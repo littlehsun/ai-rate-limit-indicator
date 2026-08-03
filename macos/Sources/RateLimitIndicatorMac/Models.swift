@@ -38,7 +38,7 @@ struct ProviderSnapshot: Codable, Identifiable, Hashable {
     }
 
     var sevenDayPercent: Int? {
-        windows.first(where: \.isSevenDay)?.usedPercent
+        windows.filter(\.isSevenDay).map(\.usedPercent).max()
     }
 
     var indicatorResetWindow: UsageWindow? {

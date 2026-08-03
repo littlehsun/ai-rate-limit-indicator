@@ -61,6 +61,18 @@ class UnifiedMacOSTests(unittest.TestCase):
             backend,
         )
 
+    def test_settings_surface_save_errors_and_auto_click_selects_provider(self):
+        app_model = (
+            MACOS / "Sources/RateLimitIndicatorMac/AppModel.swift"
+        ).read_text(encoding="utf-8")
+        views = (
+            MACOS / "Sources/RateLimitIndicatorMac/Views.swift"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("configuration.indicatorProviders = [provider]", app_model)
+        self.assertIn("configuration = previous", app_model)
+        self.assertIn("model.configurationErrorMessage", views)
+
     def test_menu_panel_has_intrinsic_content_and_recoverable_empty_state(self):
         views = (
             MACOS / "Sources/RateLimitIndicatorMac/Views.swift"

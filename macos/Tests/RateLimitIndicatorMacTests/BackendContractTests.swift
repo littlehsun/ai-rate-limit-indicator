@@ -108,6 +108,61 @@ final class BackendContractTests: XCTestCase {
         XCTAssertEqual(overridden.path, "/tmp/override.env")
     }
 
+    func testSevenDayPercentUsesLargestMatchingWindow() {
+        let snapshot = snapshot(
+            provider: "gemini",
+            windows: [
+                UsageWindow(
+                    id: "7d",
+                    label: "Gemini 7D",
+                    usedPercent: 12,
+                    resetsAt: nil,
+                    detail: nil
+                ),
+                UsageWindow(
+                    id: "claude-gpt-7d",
+                    label: "Claude/GPT 7D",
+                    usedPercent: 47,
+                    resetsAt: nil,
+                    detail: nil
+                ),
+            ]
+        )
+
+        XCTAssertEqual(snapshot.sevenDayPercent, 47)
+    }
+
+    @MainActor
+    func testAutomaticProviderClickSelectsClickedProvider() {
+        let model = AppModel(
+            configuration: .defaults,
+            saveConfiguration: { _ in },
+            startsRefreshLoop: false
+        )
+
+        model.toggleIndicator("codex")
+
+        XCTAssertEqual(model.configuration.mode, .custom)
+        XCTAssertEqual(model.configuration.indicatorProviders, ["codex"])
+    }
+
+    @MainActor
+    func testFailedConfigurationSaveRollsBackAndSurfacesError() {
+        let original = DisplayConfiguration.defaults
+        let model = AppModel(
+            configuration: original,
+            saveConfiguration: { _ in
+                throw NSError(domain: "tests", code: 1)
+            },
+            startsRefreshLoop: false
+        )
+
+        model.toggleDropdown("codex")
+
+        XCTAssertEqual(model.configuration, original)
+        XCTAssertNotNil(model.configurationErrorMessage)
+    }
+
     private func snapshot(
         provider: String,
         percent: Int,

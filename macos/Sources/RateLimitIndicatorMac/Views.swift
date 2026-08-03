@@ -427,6 +427,13 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            if let error = model.configurationErrorMessage {
+                Section {
+                    Text(error)
+                        .foregroundStyle(.red)
+                }
+            }
+
             Section {
                 Picker("Display mode", selection: modeBinding) {
                     Text("Automatic").tag(DisplayMode.auto)
@@ -448,9 +455,6 @@ struct SettingsView: View {
                     title: "Show in menu bar",
                     providers: model.configuration.indicatorProviders
                 ) { provider in
-                    if model.configuration.mode == .auto {
-                        model.setMode(.custom)
-                    }
                     model.toggleIndicator(provider)
                 }
 

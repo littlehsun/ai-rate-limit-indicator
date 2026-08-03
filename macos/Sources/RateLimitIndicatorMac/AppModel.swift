@@ -7,19 +7,28 @@ final class AppModel: ObservableObject {
     @Published private(set) var indicatorSnapshots: [ProviderSnapshot] = []
     @Published private(set) var isRefreshing = false
     @Published private(set) var errorMessage: String?
+    @Published private(set) var configurationErrorMessage: String?
     @Published var configuration: DisplayConfiguration
 
     private let backend: BackendClient
+    private let saveConfiguration: (DisplayConfiguration) throws -> Void
     private let autoSelector = AutoDisplaySelector()
 
     init(
         backend: BackendClient = BackendClient(),
-        configuration: DisplayConfiguration = ConfigurationStore.load()
+        configuration: DisplayConfiguration = ConfigurationStore.load(),
+        saveConfiguration: @escaping (DisplayConfiguration) throws -> Void = {
+            try ConfigurationStore.save($0)
+        },
+        startsRefreshLoop: Bool = true
     ) {
         self.backend = backend
         self.configuration = configuration
-        Task { [weak self] in
-            await self?.refreshLoop()
+        self.saveConfiguration = saveConfiguration
+        if startsRefreshLoop {
+            Task { [weak self] in
+                await self?.refreshLoop()
+            }
         }
     }
 
@@ -54,38 +63,37 @@ final class AppModel: ObservableObject {
     }
 
     func selectProviderFromDropdown(_ provider: String) {
-        if configuration.mode == .auto {
-            configuration.mode = .custom
-            configuration.indicatorProviders = [provider]
-        } else if configuration.indicatorProviders.contains(provider) {
-            configuration.indicatorProviders.removeAll { $0 == provider }
-        } else {
-            configuration.indicatorProviders.append(provider)
-        }
-        persistConfiguration()
+        toggleIndicator(provider)
     }
 
     func setMode(_ mode: DisplayMode) {
-        configuration.mode = mode
-        persistConfiguration()
+        updateConfiguration { $0.mode = mode }
     }
 
     func toggleIndicator(_ provider: String) {
-        toggle(provider, in: &configuration.indicatorProviders)
-        persistConfiguration()
+        updateConfiguration { configuration in
+            if configuration.mode == .auto {
+                configuration.mode = .custom
+                configuration.indicatorProviders = [provider]
+            } else {
+                toggle(provider, in: &configuration.indicatorProviders)
+            }
+        }
     }
 
     func toggleDropdown(_ provider: String) {
-        toggle(provider, in: &configuration.dropdownProviders)
-        persistConfiguration()
+        updateConfiguration { configuration in
+            toggle(provider, in: &configuration.dropdownProviders)
+        }
     }
 
     func moveProvider(_ provider: String, offset: Int) {
         guard let source = configuration.providerOrder.firstIndex(of: provider) else { return }
         let destination = source + offset
         guard configuration.providerOrder.indices.contains(destination) else { return }
-        configuration.providerOrder.swapAt(source, destination)
-        persistConfiguration()
+        updateConfiguration { configuration in
+            configuration.providerOrder.swapAt(source, destination)
+        }
     }
 
     func isSelectedForIndicator(_ provider: String) -> Bool {
@@ -100,12 +108,17 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func persistConfiguration() {
+    private func updateConfiguration(
+        _ update: (inout DisplayConfiguration) -> Void
+    ) {
+        let previous = configuration
+        update(&configuration)
         do {
-            try ConfigurationStore.save(configuration)
-            errorMessage = nil
+            try saveConfiguration(configuration)
+            configurationErrorMessage = nil
         } catch {
-            errorMessage = "Could not save display settings: \(error.localizedDescription)"
+            configuration = previous
+            configurationErrorMessage = "Could not save display settings: \(error.localizedDescription)"
         }
         resolveIndicatorSnapshots()
     }
