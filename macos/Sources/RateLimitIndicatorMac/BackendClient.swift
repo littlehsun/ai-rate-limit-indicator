@@ -63,6 +63,9 @@ struct BackendClient {
             if let grokRateCache = BackendPaths.grokRateCachePath {
                 environment["GROK_RATE_CACHE"] = grokRateCache
             }
+            if let agyRateCache = BackendPaths.agyRateCachePath {
+                environment["AGY_RATE_CACHE"] = agyRateCache
+            }
             process.environment = environment
             process.standardOutput = standardOutput
             process.standardError = standardError
@@ -167,6 +170,15 @@ enum BackendPaths {
             environmentKey: "GROK_RATE_CACHE",
             embeddedValue: Bundle.main.object(
                 forInfoDictionaryKey: "RateLimitIndicatorGrokRateCache"
+            ) as? String
+        )
+    }
+    static var agyRateCachePath: String? {
+        resolveOverride(
+            environment: ProcessInfo.processInfo.environment,
+            environmentKey: "AGY_RATE_CACHE",
+            embeddedValue: Bundle.main.object(
+                forInfoDictionaryKey: "RateLimitIndicatorAgyRateCache"
             ) as? String
         )
     }

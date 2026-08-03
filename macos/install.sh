@@ -16,6 +16,7 @@ CLAUDE_OAUTH_CREDENTIALS_FILE_OVERRIDE="${CLAUDE_OAUTH_CREDENTIALS_FILE:-}"
 GROK_HOME_OVERRIDE="${GROK_HOME:-}"
 GROK_RATE_CACHE_OVERRIDE="${GROK_RATE_CACHE:-}"
 GROK_RATE_BILLING_URL_OVERRIDE="${GROK_RATE_BILLING_URL:-}"
+AGY_RATE_CACHE_OVERRIDE="${AGY_RATE_CACHE:-}"
 LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
 LOG_DIR="$HOME/Library/Logs/RateLimitIndicator"
 LEGACY_CODEX_PLIST="$LAUNCH_AGENTS/com.hsun.codex-rate-menubar.plist"
@@ -85,6 +86,9 @@ fi
 if [[ -z "$GROK_RATE_CACHE_OVERRIDE" ]]; then
     GROK_RATE_CACHE_OVERRIDE="$(read_existing_plist_value "$EXISTING_INFO_PLIST" RateLimitIndicatorGrokRateCache)"
 fi
+if [[ -z "$AGY_RATE_CACHE_OVERRIDE" ]]; then
+    AGY_RATE_CACHE_OVERRIDE="$(read_existing_plist_value "$EXISTING_INFO_PLIST" RateLimitIndicatorAgyRateCache)"
+fi
 if [[ -z "$GROK_RATE_BILLING_URL_OVERRIDE" ]]; then
     GROK_RATE_BILLING_URL_OVERRIDE="$(read_existing_plist_value \
         "$EXISTING_GROK_PLIST" EnvironmentVariables.GROK_RATE_BILLING_URL)"
@@ -107,6 +111,9 @@ if [[ -n "$GROK_HOME_OVERRIDE" ]]; then
 fi
 if [[ -n "$GROK_RATE_CACHE_OVERRIDE" ]]; then
     GROK_RATE_CACHE_OVERRIDE="$(canonicalize_path "$GROK_RATE_CACHE_OVERRIDE")"
+fi
+if [[ -n "$AGY_RATE_CACHE_OVERRIDE" ]]; then
+    AGY_RATE_CACHE_OVERRIDE="$(canonicalize_path "$AGY_RATE_CACHE_OVERRIDE")"
 fi
 
 echo "=== Unified Rate Limit Indicator for macOS ==="
@@ -236,6 +243,10 @@ fi
 if [[ -n "$GROK_RATE_CACHE_OVERRIDE" ]]; then
     /usr/bin/plutil -insert RateLimitIndicatorGrokRateCache \
         -string "$GROK_RATE_CACHE_OVERRIDE" "$APP_DIR/Contents/Info.plist"
+fi
+if [[ -n "$AGY_RATE_CACHE_OVERRIDE" ]]; then
+    /usr/bin/plutil -insert RateLimitIndicatorAgyRateCache \
+        -string "$AGY_RATE_CACHE_OVERRIDE" "$APP_DIR/Contents/Info.plist"
 fi
 
 echo "[4/5] Installing Codex and Grok polling LaunchAgents..."

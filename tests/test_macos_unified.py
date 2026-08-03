@@ -182,6 +182,7 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn("RateLimitIndicatorClaudeOAuthCredentialsFile", mac_installer)
         self.assertIn("RateLimitIndicatorGrokHome", mac_installer)
         self.assertIn("RateLimitIndicatorGrokRateCache", mac_installer)
+        self.assertIn("RateLimitIndicatorAgyRateCache", mac_installer)
         self.assertIn("read_existing_plist_value", mac_installer)
         self.assertIn(
             'CONFIG_FILE="$(read_existing_plist_value "$EXISTING_INFO_PLIST" RateLimitIndicatorConfigPath)"',
@@ -275,6 +276,7 @@ class UnifiedMacOSTests(unittest.TestCase):
         )
         self.assertIn('environment["GROK_HOME"] = grokHome', backend)
         self.assertIn('environment["GROK_RATE_CACHE"] = grokRateCache', backend)
+        self.assertIn('environment["AGY_RATE_CACHE"] = agyRateCache', backend)
 
     def test_settings_surface_save_errors_and_auto_click_selects_provider(self):
         app_model = (
