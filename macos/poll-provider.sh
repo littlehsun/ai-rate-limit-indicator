@@ -15,11 +15,7 @@ fi
 is_enabled() {
     local key="$1"
     local value
-    value="$(
-        sed -n -E "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*([^#[:space:]]+).*$/\\1/p" \
-            "$CONFIG_FILE" 2>/dev/null | tail -n 1
-    )"
-    value="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')"
+    value="$(config_value "$key")"
     case "$value" in
         1|true|yes|on) return 0 ;;
         *) return 1 ;;

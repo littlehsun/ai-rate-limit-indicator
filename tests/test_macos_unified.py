@@ -66,6 +66,47 @@ class UnifiedMacOSTests(unittest.TestCase):
             self.assertTrue(marker.exists())
             self.assertEqual(marker.read_text(encoding="utf-8"), "test-token")
 
+    def test_provider_pollers_accept_quoted_enabled_flags(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_dir = Path(tmp)
+            config = temp_dir / "providers.env"
+            marker = temp_dir / "python-ran"
+            fake_python = temp_dir / "python3"
+            config.write_text(
+                "CODEX='true'\nCODEX_RATE_SOURCE=\"auto\"\nGROK=\"yes\"\n",
+                encoding="utf-8",
+            )
+            fake_python.write_text(
+                '#!/usr/bin/env bash\nprintf "%s\n" "$*" >> "$MARKER"\n',
+                encoding="utf-8",
+            )
+            fake_python.chmod(0o700)
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "MARKER": str(marker),
+                    "RATE_LIMIT_INDICATOR_CONFIG": str(config),
+                    "RATE_LIMIT_INDICATOR_PYTHON": str(fake_python),
+                    "RATE_LIMIT_INDICATOR_APP_SUPPORT": str(temp_dir),
+                    "CODEX_RATE_WHAM_ENV": str(temp_dir / "missing-wham.env"),
+                }
+            )
+
+            for provider in ("codex", "grok"):
+                result = subprocess.run(
+                    ["bash", str(MACOS / "poll-provider.sh"), provider],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env=environment,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+            invocations = marker.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(invocations), 2)
+            self.assertTrue(invocations[0].endswith("collectors/wham.py --once"))
+            self.assertTrue(invocations[1].endswith("collectors/grok_rate.py --once"))
+
     def test_native_ui_consumes_shared_normalized_cli(self):
         backend = (
             MACOS / "Sources/RateLimitIndicatorMac/BackendClient.swift"
