@@ -83,17 +83,76 @@ strip_unquoted_comment() {
 
 expand_supported_path_variables() {
     local value="$1"
-    case "$value" in
-        '~') value="$HOME" ;;
-        '~/'*) value="$HOME/${value:2}" ;;
-    esac
-    value="${value//\$\{HOME\}/$HOME}"
-    value="${value//\$HOME/$HOME}"
-    if [[ -n "${XDG_CACHE_HOME:-}" ]]; then
-        value="${value//\$\{XDG_CACHE_HOME\}/$XDG_CACHE_HOME}"
-        value="${value//\$XDG_CACHE_HOME/$XDG_CACHE_HOME}"
+    local quote_style="${2:-unquoted}"
+    local output=""
+    local rest
+    local character
+    local index=0
+    local home_braced='${HOME}'
+    local home_plain='$HOME'
+    local cache_braced='${XDG_CACHE_HOME}'
+    local cache_plain='$XDG_CACHE_HOME'
+    if [[ "$quote_style" == "single" ]]; then
+        printf '%s' "$value"
+        return
     fi
-    printf '%s' "$value"
+    if [[ "$quote_style" == "unquoted" ]]; then
+        case "$value" in
+            '~') value="$HOME" ;;
+            '~/'*) value="$HOME/${value:2}" ;;
+        esac
+    fi
+    while ((index < ${#value})); do
+        rest="${value:index}"
+        character="${value:index:1}"
+        if [[ "$character" == "\\" && ${#rest} -ge 2 ]]; then
+            output+="${rest:0:2}"
+            ((index += 2))
+        elif [[ "$rest" == "$home_braced"* ]]; then
+            output+="$HOME"
+            ((index += ${#home_braced}))
+        elif [[ "$rest" == "$home_plain"* ]]; then
+            output+="$HOME"
+            ((index += ${#home_plain}))
+        elif [[ -n "${XDG_CACHE_HOME:-}" && "$rest" == "$cache_braced"* ]]; then
+            output+="$XDG_CACHE_HOME"
+            ((index += ${#cache_braced}))
+        elif [[ -n "${XDG_CACHE_HOME:-}" && "$rest" == "$cache_plain"* ]]; then
+            output+="$XDG_CACHE_HOME"
+            ((index += ${#cache_plain}))
+        else
+            output+="$character"
+            ((index += 1))
+        fi
+    done
+    printf '%s' "$output"
+}
+
+decode_supported_path_escapes() {
+    local value="$1"
+    local quote_style="${2:-unquoted}"
+    local output=""
+    local character
+    local next
+    local index=0
+    while ((index < ${#value})); do
+        character="${value:index:1}"
+        if [[ "$character" != "\\" ]] || ((index + 1 >= ${#value})); then
+            output+="$character"
+            ((index += 1))
+            continue
+        fi
+        next="${value:index+1:1}"
+        if [[ "$quote_style" == "single" ]]; then
+            output+="\\$next"
+        elif [[ "$quote_style" == "double" && "$next" != '$' && "$next" != '"' && "$next" != '\\' && "$next" != '`' ]]; then
+            output+="\\$next"
+        else
+            output+="$next"
+        fi
+        ((index += 2))
+    done
+    printf '%s' "$output"
 }
 
 load_wham_environment() {
@@ -101,6 +160,7 @@ load_wham_environment() {
     local line
     local key
     local value
+    local quote_style
     while IFS= read -r line || [[ -n "$line" ]]; do
         case "$line" in
             ''|'#'*) continue ;;
@@ -118,12 +178,21 @@ load_wham_environment() {
         esac
         value="$(printf '%s' "$value" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
         value="$(strip_unquoted_comment "$value")"
+        quote_style=unquoted
         case "$value" in
-            \"*\"|\'*\') value="${value:1:${#value}-2}" ;;
+            \"*\")
+                quote_style=double
+                value="${value:1:${#value}-2}"
+                ;;
+            \'*\')
+                quote_style=single
+                value="${value:1:${#value}-2}"
+                ;;
         esac
         case "$key" in
             CODEX_AUTH_FILE|XDG_CACHE_HOME|CODEX_RATE_WHAM_CACHE)
-                value="$(expand_supported_path_variables "$value")"
+                value="$(expand_supported_path_variables "$value" "$quote_style")"
+                value="$(decode_supported_path_escapes "$value" "$quote_style")"
                 ;;
         esac
         export "$key=$value"

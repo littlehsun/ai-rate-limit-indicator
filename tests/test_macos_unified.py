@@ -31,7 +31,7 @@ class UnifiedMacOSTests(unittest.TestCase):
             wham_env.write_text(
                 "export CHATGPT_ACCESS_TOKEN=test-token # personal account\n"
                 'CHATGPT_WHAM_USAGE_URL="https://example.test/#usage" # endpoint\n'
-                'CODEX_AUTH_FILE="$HOME/custom-auth.json"\n'
+                'CODEX_AUTH_FILE=$HOME/Library/Application\\ Support/Codex/auth.json\n'
                 'XDG_CACHE_HOME="${HOME}/cache-root"\n'
                 'CODEX_RATE_WHAM_CACHE="${XDG_CACHE_HOME}/wham.json"\n',
                 encoding="utf-8",
@@ -78,7 +78,7 @@ class UnifiedMacOSTests(unittest.TestCase):
                     (
                         "test-token",
                         "https://example.test/#usage",
-                        str(temp_dir / "custom-auth.json"),
+                        str(temp_dir / "Library/Application Support/Codex/auth.json"),
                         str(temp_dir / "cache-root/wham.json"),
                     )
                 ),
