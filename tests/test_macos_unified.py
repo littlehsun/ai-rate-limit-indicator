@@ -189,6 +189,8 @@ class UnifiedMacOSTests(unittest.TestCase):
         )
         self.assertIn("EnvironmentVariables.RATE_LIMIT_INDICATOR_CONFIG", mac_installer)
         self.assertIn("EnvironmentVariables.RATE_LIMIT_INDICATOR_PYTHON", mac_installer)
+        self.assertIn("EnvironmentVariables.CODEX_AUTH_FILE", mac_installer)
+        self.assertIn('"$CODEX_HOME_OVERRIDE/auth.json"', mac_installer)
         self.assertIn("EnvironmentVariables.GROK_HOME", mac_installer)
         self.assertIn("EnvironmentVariables.GROK_RATE_CACHE", mac_installer)
         self.assertIn("EnvironmentVariables.GROK_RATE_BILLING_URL", mac_installer)

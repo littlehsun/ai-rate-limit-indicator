@@ -273,6 +273,10 @@ PLIST
         -string "$CONFIG_FILE" "$plist"
     /usr/bin/plutil -insert EnvironmentVariables.RATE_LIMIT_INDICATOR_PYTHON \
         -string "$PYTHON_BIN" "$plist"
+    if [[ "$provider" == "codex" && -n "$CODEX_HOME_OVERRIDE" ]]; then
+        /usr/bin/plutil -insert EnvironmentVariables.CODEX_AUTH_FILE \
+            -string "$CODEX_HOME_OVERRIDE/auth.json" "$plist"
+    fi
     if [[ "$provider" == "grok" ]]; then
         if [[ -n "$GROK_HOME_OVERRIDE" ]]; then
             /usr/bin/plutil -insert EnvironmentVariables.GROK_HOME \
