@@ -73,7 +73,9 @@ class UnifiedMacOSTests(unittest.TestCase):
             marker = temp_dir / "python-ran"
             fake_python = temp_dir / "python3"
             config.write_text(
-                "CODEX='true'\nCODEX_RATE_SOURCE=\"auto\"\nGROK=\"yes\"\n",
+                "export CODEX='true'\n"
+                "export CODEX_RATE_SOURCE=\"auto\"\n"
+                "export GROK=\"yes\"\n",
                 encoding="utf-8",
             )
             fake_python.write_text(
@@ -188,7 +190,10 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn('echo "CODEX_RATE_SOURCE=$legacy_codex_source"', mac_installer)
         self.assertIn("LEGACY_CODEX_ENV", mac_installer)
         self.assertIn('auto|wham) ;;', mac_installer)
-        self.assertIn("CODEX_RATE_SOURCE[[:space:]]*=", mac_installer)
+        self.assertIn(
+            "(export[[:space:]]+)?CODEX_RATE_SOURCE[[:space:]]*=",
+            mac_installer,
+        )
         self.assertIn("(export[[:space:]]+)?CODEX_RATE_SOURCE", mac_installer)
         self.assertIn("os.path.realpath(os.path.expanduser(sys.argv[1]))", mac_installer)
         self.assertIn('APP_DIR="$(canonicalize_path "$APP_DIR")"', mac_installer)
