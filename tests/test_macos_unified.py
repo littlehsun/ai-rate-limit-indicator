@@ -12,10 +12,15 @@ class UnifiedMacOSTests(unittest.TestCase):
             MACOS / "Sources/RateLimitIndicatorMac/BackendClient.swift"
         ).read_text(encoding="utf-8")
         installer = (MACOS / "install.sh").read_text(encoding="utf-8")
+        launch_manager = (
+            MACOS / "Sources/RateLimitIndicatorMac/LaunchAtLoginManager.swift"
+        ).read_text(encoding="utf-8")
 
         self.assertIn('"--json"', backend)
         self.assertIn('unified-indicator/cli.py', installer)
         self.assertIn('unified-indicator/adapters.py', installer)
+        self.assertIn("retireLegacyAgent()", launch_manager)
+        self.assertIn("com.hsun.codex-rate-menubar.plist", launch_manager)
 
     def test_swift_ui_does_not_duplicate_provider_api_endpoints(self):
         source = "\n".join(

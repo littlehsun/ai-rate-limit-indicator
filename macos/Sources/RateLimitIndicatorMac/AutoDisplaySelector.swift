@@ -13,7 +13,9 @@ final class AutoDisplaySelector {
         }
         guard !eligible.isEmpty else {
             if let selectedProvider,
-               let retained = snapshots.first(where: { $0.provider == selectedProvider }) {
+               let retained = snapshots.first(where: {
+                   $0.provider == selectedProvider && $0.status == "stale"
+               }) {
                 return retained
             }
             let candidates = snapshots.filter { $0.status == "fresh" }

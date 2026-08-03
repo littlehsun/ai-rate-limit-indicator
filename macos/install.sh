@@ -163,14 +163,15 @@ PLIST
     launchctl bootstrap "gui/$UID" "$plist"
 done
 
-echo "Retiring the legacy Codex menu-bar LaunchAgent..."
+echo "Preparing legacy Codex menu-bar migration..."
 if [[ "$legacy_login_was_enabled" == true ]]; then
     touch "$LEGACY_LOGIN_MIGRATION_MARKER"
     chmod 600 "$LEGACY_LOGIN_MIGRATION_MARKER"
+else
+    launchctl bootout "gui/$UID/com.hsun.codex-rate-menubar" 2>/dev/null || true
+    launchctl bootout "gui/$UID" "$LEGACY_CODEX_PLIST" 2>/dev/null || true
+    rm -f "$LEGACY_CODEX_PLIST"
 fi
-launchctl bootout "gui/$UID/com.hsun.codex-rate-menubar" 2>/dev/null || true
-launchctl bootout "gui/$UID" "$LEGACY_CODEX_PLIST" 2>/dev/null || true
-rm -f "$LEGACY_CODEX_PLIST"
 
 echo "[5/5] Installed."
 echo "App: $APP_DIR"

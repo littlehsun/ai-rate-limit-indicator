@@ -66,6 +66,44 @@ final class BackendContractTests: XCTestCase {
         XCTAssertEqual(selector.choose(from: fresh)?.provider, "codex")
     }
 
+    func testAutoSelectionDoesNotRetainErrorSnapshot() {
+        let selector = AutoDisplaySelector()
+        _ = selector.choose(from: [
+            snapshot(provider: "codex", percent: 20, updatedAt: "2026-07-30T05:00:00Z"),
+        ])
+        let failedCodex = ProviderSnapshot(
+            provider: "codex",
+            label: "Codex",
+            updatedAt: nil,
+            windows: [],
+            status: "error",
+            error: "unavailable",
+            extras: []
+        )
+        let freshGrok = ProviderSnapshot(
+            provider: "grok",
+            label: "Grok",
+            updatedAt: "2026-07-30T05:01:00Z",
+            windows: [
+                UsageWindow(
+                    id: "monthly",
+                    label: "Monthly",
+                    usedPercent: 12,
+                    resetsAt: nil,
+                    detail: nil
+                ),
+            ],
+            status: "fresh",
+            error: nil,
+            extras: []
+        )
+
+        XCTAssertEqual(
+            selector.choose(from: [failedCodex, freshGrok])?.provider,
+            "grok"
+        )
+    }
+
     func testConfigurationFiltersDisabledProviders() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
