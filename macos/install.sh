@@ -9,7 +9,7 @@ COLLECTOR_DIR="$BACKEND_DIR/collectors"
 ASSET_DIR="$APP_SUPPORT/assets"
 APP_DIR="${RATE_LIMIT_INDICATOR_APP_DIR:-$HOME/Applications/Rate Limit Indicator.app}"
 DEFAULT_CONFIG_FILE="$HOME/.config/rate-limit-indicator/providers.env"
-CONFIG_FILE="${RATE_LIMIT_INDICATOR_CONFIG:-$DEFAULT_CONFIG_FILE}"
+CONFIG_FILE="${RATE_LIMIT_INDICATOR_CONFIG:-}"
 CODEX_HOME_OVERRIDE="${CODEX_HOME:-}"
 CLAUDE_CONFIG_DIR_OVERRIDE="${CLAUDE_CONFIG_DIR:-}"
 CLAUDE_OAUTH_CREDENTIALS_FILE_OVERRIDE="${CLAUDE_OAUTH_CREDENTIALS_FILE:-}"
@@ -51,6 +51,12 @@ normalize_config_value() {
     fi
     printf '%s' "$value"
 }
+read_existing_plist_value() {
+    local plist="$1"
+    local key="$2"
+    [[ -f "$plist" ]] || return 0
+    /usr/bin/plutil -extract "$key" raw -o - "$plist" 2>/dev/null || true
+}
 PYTHON_BIN="$(command -v python3)"
 if [[ "$PYTHON_BIN" != /* || ! -x "$PYTHON_BIN" ]]; then
     echo "python3 must resolve to an executable absolute path: $PYTHON_BIN" >&2
@@ -59,7 +65,32 @@ fi
 APP_DIR="$(canonicalize_path "$APP_DIR")"
 APP_EXECUTABLE="$APP_DIR/Contents/MacOS/RateLimitIndicatorMac"
 STAGED_APP_EXECUTABLE="$APP_DIR/Contents/MacOS/.RateLimitIndicatorMac.new"
+EXISTING_INFO_PLIST="$APP_DIR/Contents/Info.plist"
+EXISTING_GROK_PLIST="$HOME/Library/LaunchAgents/com.hsun.rate-limit-indicator.grok-poll.plist"
+if [[ -z "$CONFIG_FILE" ]]; then
+    CONFIG_FILE="$(read_existing_plist_value "$EXISTING_INFO_PLIST" RateLimitIndicatorConfigPath)"
+fi
+if [[ -z "$CODEX_HOME_OVERRIDE" ]]; then
+    CODEX_HOME_OVERRIDE="$(read_existing_plist_value "$EXISTING_INFO_PLIST" RateLimitIndicatorCodexHome)"
+fi
+if [[ -z "$CLAUDE_CONFIG_DIR_OVERRIDE" ]]; then
+    CLAUDE_CONFIG_DIR_OVERRIDE="$(read_existing_plist_value "$EXISTING_INFO_PLIST" RateLimitIndicatorClaudeConfigDir)"
+fi
+if [[ -z "$CLAUDE_OAUTH_CREDENTIALS_FILE_OVERRIDE" ]]; then
+    CLAUDE_OAUTH_CREDENTIALS_FILE_OVERRIDE="$(read_existing_plist_value "$EXISTING_INFO_PLIST" RateLimitIndicatorClaudeOAuthCredentialsFile)"
+fi
+if [[ -z "$GROK_HOME_OVERRIDE" ]]; then
+    GROK_HOME_OVERRIDE="$(read_existing_plist_value "$EXISTING_INFO_PLIST" RateLimitIndicatorGrokHome)"
+fi
+if [[ -z "$GROK_RATE_CACHE_OVERRIDE" ]]; then
+    GROK_RATE_CACHE_OVERRIDE="$(read_existing_plist_value "$EXISTING_INFO_PLIST" RateLimitIndicatorGrokRateCache)"
+fi
+if [[ -z "$GROK_RATE_BILLING_URL_OVERRIDE" ]]; then
+    GROK_RATE_BILLING_URL_OVERRIDE="$(read_existing_plist_value \
+        "$EXISTING_GROK_PLIST" EnvironmentVariables.GROK_RATE_BILLING_URL)"
+fi
 DEFAULT_CONFIG_FILE="$(canonicalize_path "$DEFAULT_CONFIG_FILE")"
+CONFIG_FILE="${CONFIG_FILE:-$DEFAULT_CONFIG_FILE}"
 CONFIG_FILE="$(canonicalize_path "$CONFIG_FILE")"
 CONFIG_DIR="$(dirname "$CONFIG_FILE")"
 if [[ -n "$CODEX_HOME_OVERRIDE" ]]; then

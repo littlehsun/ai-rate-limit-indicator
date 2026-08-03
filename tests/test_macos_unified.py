@@ -162,6 +162,23 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn("RateLimitIndicatorClaudeOAuthCredentialsFile", mac_installer)
         self.assertIn("RateLimitIndicatorGrokHome", mac_installer)
         self.assertIn("RateLimitIndicatorGrokRateCache", mac_installer)
+        self.assertIn("read_existing_plist_value", mac_installer)
+        self.assertIn(
+            'CONFIG_FILE="$(read_existing_plist_value "$EXISTING_INFO_PLIST" RateLimitIndicatorConfigPath)"',
+            mac_installer,
+        )
+        self.assertIn(
+            'CODEX_HOME_OVERRIDE="$(read_existing_plist_value "$EXISTING_INFO_PLIST" RateLimitIndicatorCodexHome)"',
+            mac_installer,
+        )
+        self.assertIn(
+            '"$EXISTING_GROK_PLIST" EnvironmentVariables.GROK_RATE_BILLING_URL',
+            mac_installer,
+        )
+        self.assertLess(
+            mac_installer.index("read_existing_plist_value"),
+            mac_installer.index('CONFIG_FILE="$(canonicalize_path "$CONFIG_FILE")"'),
+        )
         self.assertIn("EnvironmentVariables.RATE_LIMIT_INDICATOR_CONFIG", mac_installer)
         self.assertIn("EnvironmentVariables.RATE_LIMIT_INDICATOR_PYTHON", mac_installer)
         self.assertIn("EnvironmentVariables.GROK_HOME", mac_installer)
