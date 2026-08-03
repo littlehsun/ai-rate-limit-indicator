@@ -19,6 +19,10 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn('"--json"', backend)
         self.assertIn('unified-indicator/cli.py', installer)
         self.assertIn('unified-indicator/adapters.py', installer)
+        self.assertLess(
+            backend.index("let outputReader = Task.detached"),
+            backend.index("process.waitUntilExit()"),
+        )
         self.assertIn("retireLegacyAgent()", launch_manager)
         self.assertIn("com.hsun.codex-rate-menubar.plist", launch_manager)
         self.assertIn("migrationErrorMessage", launch_manager)
@@ -67,6 +71,14 @@ class UnifiedMacOSTests(unittest.TestCase):
         )
         self.assertIn("legacy_login_was_enabled=true", mac_installer)
         self.assertIn("migrate-legacy-launch-at-login", mac_installer)
+        self.assertIn("STAGED_APP_EXECUTABLE", mac_installer)
+        self.assertIn("pgrep -x RateLimitIndicatorMac", mac_installer)
+        self.assertIn('mv -f "$STAGED_APP_EXECUTABLE" "$APP_EXECUTABLE"', mac_installer)
+        self.assertIn('if [[ "$app_was_running" == true ]]', mac_installer)
+        self.assertLess(
+            mac_installer.index('launchctl bootstrap "gui/$UID" "$plist"'),
+            mac_installer.index('mv -f "$STAGED_APP_EXECUTABLE" "$APP_EXECUTABLE"'),
+        )
         self.assertLess(
             mac_installer.index('launchctl bootstrap "gui/$UID" "$plist"'),
             mac_installer.index('rm -f "$LEGACY_CODEX_PLIST"'),
@@ -137,6 +149,7 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn(".max(by: { $0.usedPercent < $1.usedPercent })", views)
         self.assertIn("snapshot.indicatorResetWindow", views)
         self.assertIn("snapshot.indicatorDisplayWindows", views)
+        self.assertIn('snapshot.status == "stale" ? "~" : ""', views)
         self.assertIn('snapshot.status == "stale" ? "~" : ""', views)
 
 

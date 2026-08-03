@@ -9,6 +9,7 @@ COLLECTOR_DIR="$BACKEND_DIR/collectors"
 ASSET_DIR="$APP_SUPPORT/assets"
 APP_DIR="${RATE_LIMIT_INDICATOR_APP_DIR:-$HOME/Applications/Rate Limit Indicator.app}"
 APP_EXECUTABLE="$APP_DIR/Contents/MacOS/RateLimitIndicatorMac"
+STAGED_APP_EXECUTABLE="$APP_DIR/Contents/MacOS/.RateLimitIndicatorMac.new"
 DEFAULT_CONFIG_FILE="$HOME/.config/rate-limit-indicator/providers.env"
 CONFIG_FILE="${RATE_LIMIT_INDICATOR_CONFIG:-$DEFAULT_CONFIG_FILE}"
 LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
@@ -97,8 +98,8 @@ echo "[3/5] Building the native SwiftUI app..."
 swift build --package-path "$SCRIPT_DIR" -c release --product RateLimitIndicatorMac
 BIN_DIR="$(swift build --package-path "$SCRIPT_DIR" -c release --show-bin-path)"
 mkdir -p "$APP_DIR/Contents/MacOS"
-cp "$BIN_DIR/RateLimitIndicatorMac" "$APP_EXECUTABLE"
-chmod +x "$APP_EXECUTABLE"
+cp "$BIN_DIR/RateLimitIndicatorMac" "$STAGED_APP_EXECUTABLE"
+chmod +x "$STAGED_APP_EXECUTABLE"
 cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -182,12 +183,39 @@ else
     rm -f "$LEGACY_CODEX_PLIST"
 fi
 
+app_was_running=false
+if pgrep -x RateLimitIndicatorMac >/dev/null 2>&1; then
+    app_was_running=true
+    osascript -e 'tell application id "com.hsun.rate-limit-indicator" to quit' \
+        >/dev/null 2>&1 || true
+    for _ in {1..20}; do
+        pgrep -x RateLimitIndicatorMac >/dev/null 2>&1 || break
+        sleep 0.25
+    done
+    if pgrep -x RateLimitIndicatorMac >/dev/null 2>&1; then
+        pkill -x RateLimitIndicatorMac 2>/dev/null || true
+    fi
+    for _ in {1..20}; do
+        pgrep -x RateLimitIndicatorMac >/dev/null 2>&1 || break
+        sleep 0.25
+    done
+    if pgrep -x RateLimitIndicatorMac >/dev/null 2>&1; then
+        echo "Could not stop the running Rate Limit Indicator app." >&2
+        exit 1
+    fi
+fi
+mv -f "$STAGED_APP_EXECUTABLE" "$APP_EXECUTABLE"
+
 echo "[5/5] Installed."
 echo "App: $APP_DIR"
 echo "Config: $CONFIG_FILE"
 echo "Backend: $BACKEND_DIR"
 echo
-read -r -p "Open Rate Limit Indicator now? (Y/n) " answer || answer=""
-if [[ ! "$answer" =~ ^[Nn]$ ]]; then
+if [[ "$app_was_running" == true ]]; then
     open "$APP_DIR"
+else
+    read -r -p "Open Rate Limit Indicator now? (Y/n) " answer || answer=""
+    if [[ ! "$answer" =~ ^[Nn]$ ]]; then
+        open "$APP_DIR"
+    fi
 fi

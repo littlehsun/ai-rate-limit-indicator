@@ -57,10 +57,16 @@ struct BackendClient {
             } catch {
                 throw BackendError.failed("Could not start the unified backend: \(error.localizedDescription)")
             }
+            let outputReader = Task.detached(priority: .utility) {
+                standardOutput.fileHandleForReading.readDataToEndOfFile()
+            }
+            let errorReader = Task.detached(priority: .utility) {
+                standardError.fileHandleForReading.readDataToEndOfFile()
+            }
             process.waitUntilExit()
 
-            let output = standardOutput.fileHandleForReading.readDataToEndOfFile()
-            let errorOutput = standardError.fileHandleForReading.readDataToEndOfFile()
+            let output = await outputReader.value
+            let errorOutput = await errorReader.value
             guard process.terminationStatus == 0 else {
                 let detail = String(data: errorOutput, encoding: .utf8)?
                     .trimmingCharacters(in: .whitespacesAndNewlines)

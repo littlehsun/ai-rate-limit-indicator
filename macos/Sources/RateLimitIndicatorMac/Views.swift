@@ -202,7 +202,7 @@ private struct ProviderStatusLabel: View {
                         Text("|")
                             .foregroundStyle(.gray)
                     }
-                    Text("\(window.usedPercent)%")
+                    Text("\(index == 0 ? stalePrefix : "")\(window.usedPercent)%")
                         .foregroundStyle(UsageColor.color(for: window.usedPercent))
                         .monospacedDigit()
                 }
@@ -222,6 +222,10 @@ private struct ProviderStatusLabel: View {
             return "\(snapshot.label): cached data; sign in to the provider to refresh it."
         }
         return snapshot.label
+    }
+
+    private var stalePrefix: String {
+        snapshot.status == "stale" ? "~" : ""
     }
 }
 
