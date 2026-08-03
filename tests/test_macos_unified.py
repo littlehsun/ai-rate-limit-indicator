@@ -123,6 +123,21 @@ class UnifiedMacOSTests(unittest.TestCase):
                 ),
             )
 
+            explicit_cache = temp_dir / "explicit-cache/wham.json"
+            environment["CODEX_RATE_WHAM_CACHE"] = str(explicit_cache)
+            explicit_result = subprocess.run(
+                ["bash", str(MACOS / "poll-provider.sh"), "codex"],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertEqual(explicit_result.returncode, 0, explicit_result.stderr)
+            self.assertEqual(
+                marker.read_text(encoding="utf-8").splitlines()[-1],
+                str(explicit_cache),
+            )
+
     def test_provider_pollers_accept_quoted_enabled_flags(self):
         with tempfile.TemporaryDirectory() as tmp:
             temp_dir = Path(tmp)

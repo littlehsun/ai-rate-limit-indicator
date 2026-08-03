@@ -176,6 +176,9 @@ load_wham_environment() {
             CHATGPT_WHAM_RESET_CREDITS_URL|CHATGPT_WHAM_TIMEOUT) ;;
             *) continue ;;
         esac
+        if /usr/bin/printenv "$key" >/dev/null 2>&1; then
+            continue
+        fi
         value="$(printf '%s' "$value" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
         value="$(strip_unquoted_comment "$value")"
         quote_style=unquoted
