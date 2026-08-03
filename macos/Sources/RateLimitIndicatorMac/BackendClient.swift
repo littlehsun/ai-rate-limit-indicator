@@ -48,6 +48,12 @@ struct BackendClient {
             process.arguments = [cliURL.path, "--json"]
             var environment = ProcessInfo.processInfo.environment
             environment["RATE_LIMIT_INDICATOR_CONFIG"] = configURL.path
+            if let grokHome = BackendPaths.grokHomePath {
+                environment["GROK_HOME"] = grokHome
+            }
+            if let grokRateCache = BackendPaths.grokRateCachePath {
+                environment["GROK_RATE_CACHE"] = grokRateCache
+            }
             process.environment = environment
             process.standardOutput = standardOutput
             process.standardError = standardError
@@ -109,6 +115,38 @@ enum BackendPaths {
                 forInfoDictionaryKey: "RateLimitIndicatorConfigPath"
             ) as? String
         )
+    }
+    static var grokHomePath: String? {
+        resolveOverride(
+            environment: ProcessInfo.processInfo.environment,
+            environmentKey: "GROK_HOME",
+            embeddedValue: Bundle.main.object(
+                forInfoDictionaryKey: "RateLimitIndicatorGrokHome"
+            ) as? String
+        )
+    }
+    static var grokRateCachePath: String? {
+        resolveOverride(
+            environment: ProcessInfo.processInfo.environment,
+            environmentKey: "GROK_RATE_CACHE",
+            embeddedValue: Bundle.main.object(
+                forInfoDictionaryKey: "RateLimitIndicatorGrokRateCache"
+            ) as? String
+        )
+    }
+
+    static func resolveOverride(
+        environment: [String: String],
+        environmentKey: String,
+        embeddedValue: String?
+    ) -> String? {
+        if let value = environment[environmentKey], !value.isEmpty {
+            return value
+        }
+        if let value = embeddedValue, !value.isEmpty {
+            return value
+        }
+        return nil
     }
 
     static func resolveConfigURL(

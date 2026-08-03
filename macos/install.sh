@@ -10,6 +10,9 @@ ASSET_DIR="$APP_SUPPORT/assets"
 APP_DIR="${RATE_LIMIT_INDICATOR_APP_DIR:-$HOME/Applications/Rate Limit Indicator.app}"
 DEFAULT_CONFIG_FILE="$HOME/.config/rate-limit-indicator/providers.env"
 CONFIG_FILE="${RATE_LIMIT_INDICATOR_CONFIG:-$DEFAULT_CONFIG_FILE}"
+GROK_HOME_OVERRIDE="${GROK_HOME:-}"
+GROK_RATE_CACHE_OVERRIDE="${GROK_RATE_CACHE:-}"
+GROK_RATE_BILLING_URL_OVERRIDE="${GROK_RATE_BILLING_URL:-}"
 LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
 LOG_DIR="$HOME/Library/Logs/RateLimitIndicator"
 LEGACY_CODEX_PLIST="$LAUNCH_AGENTS/com.hsun.codex-rate-menubar.plist"
@@ -42,6 +45,12 @@ STAGED_APP_EXECUTABLE="$APP_DIR/Contents/MacOS/.RateLimitIndicatorMac.new"
 DEFAULT_CONFIG_FILE="$(canonicalize_path "$DEFAULT_CONFIG_FILE")"
 CONFIG_FILE="$(canonicalize_path "$CONFIG_FILE")"
 CONFIG_DIR="$(dirname "$CONFIG_FILE")"
+if [[ -n "$GROK_HOME_OVERRIDE" ]]; then
+    GROK_HOME_OVERRIDE="$(canonicalize_path "$GROK_HOME_OVERRIDE")"
+fi
+if [[ -n "$GROK_RATE_CACHE_OVERRIDE" ]]; then
+    GROK_RATE_CACHE_OVERRIDE="$(canonicalize_path "$GROK_RATE_CACHE_OVERRIDE")"
+fi
 
 echo "=== Unified Rate Limit Indicator for macOS ==="
 legacy_login_was_enabled=false
@@ -139,6 +148,14 @@ PLIST
     "$APP_DIR/Contents/Info.plist"
 /usr/bin/plutil -insert RateLimitIndicatorPythonPath -string "$PYTHON_BIN" \
     "$APP_DIR/Contents/Info.plist"
+if [[ -n "$GROK_HOME_OVERRIDE" ]]; then
+    /usr/bin/plutil -insert RateLimitIndicatorGrokHome -string "$GROK_HOME_OVERRIDE" \
+        "$APP_DIR/Contents/Info.plist"
+fi
+if [[ -n "$GROK_RATE_CACHE_OVERRIDE" ]]; then
+    /usr/bin/plutil -insert RateLimitIndicatorGrokRateCache \
+        -string "$GROK_RATE_CACHE_OVERRIDE" "$APP_DIR/Contents/Info.plist"
+fi
 
 echo "[4/5] Installing Codex and Grok polling LaunchAgents..."
 mkdir -p "$LAUNCH_AGENTS" "$LOG_DIR"
@@ -175,6 +192,20 @@ PLIST
         -string "$CONFIG_FILE" "$plist"
     /usr/bin/plutil -insert EnvironmentVariables.RATE_LIMIT_INDICATOR_PYTHON \
         -string "$PYTHON_BIN" "$plist"
+    if [[ "$provider" == "grok" ]]; then
+        if [[ -n "$GROK_HOME_OVERRIDE" ]]; then
+            /usr/bin/plutil -insert EnvironmentVariables.GROK_HOME \
+                -string "$GROK_HOME_OVERRIDE" "$plist"
+        fi
+        if [[ -n "$GROK_RATE_CACHE_OVERRIDE" ]]; then
+            /usr/bin/plutil -insert EnvironmentVariables.GROK_RATE_CACHE \
+                -string "$GROK_RATE_CACHE_OVERRIDE" "$plist"
+        fi
+        if [[ -n "$GROK_RATE_BILLING_URL_OVERRIDE" ]]; then
+            /usr/bin/plutil -insert EnvironmentVariables.GROK_RATE_BILLING_URL \
+                -string "$GROK_RATE_BILLING_URL_OVERRIDE" "$plist"
+        fi
+    fi
     launchctl bootout "gui/$UID" "$plist" 2>/dev/null || true
     launchctl bootstrap "gui/$UID" "$plist"
 done

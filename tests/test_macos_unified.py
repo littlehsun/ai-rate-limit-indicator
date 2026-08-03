@@ -116,8 +116,13 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn('rm -f "$LEGACY_CODEX_PLIST"', mac_installer)
         self.assertIn("RateLimitIndicatorConfigPath", mac_installer)
         self.assertIn("RateLimitIndicatorPythonPath", mac_installer)
+        self.assertIn("RateLimitIndicatorGrokHome", mac_installer)
+        self.assertIn("RateLimitIndicatorGrokRateCache", mac_installer)
         self.assertIn("EnvironmentVariables.RATE_LIMIT_INDICATOR_CONFIG", mac_installer)
         self.assertIn("EnvironmentVariables.RATE_LIMIT_INDICATOR_PYTHON", mac_installer)
+        self.assertIn("EnvironmentVariables.GROK_HOME", mac_installer)
+        self.assertIn("EnvironmentVariables.GROK_RATE_CACHE", mac_installer)
+        self.assertIn("EnvironmentVariables.GROK_RATE_BILLING_URL", mac_installer)
         self.assertIn("CODEX_RATE_SOURCE=local", mac_installer)
         self.assertIn("os.path.realpath(os.path.expanduser(sys.argv[1]))", mac_installer)
         self.assertIn('APP_DIR="$(canonicalize_path "$APP_DIR")"', mac_installer)
@@ -166,6 +171,8 @@ class UnifiedMacOSTests(unittest.TestCase):
             'environment["RATE_LIMIT_INDICATOR_CONFIG"] = configURL.path',
             backend,
         )
+        self.assertIn('environment["GROK_HOME"] = grokHome', backend)
+        self.assertIn('environment["GROK_RATE_CACHE"] = grokRateCache', backend)
 
     def test_settings_surface_save_errors_and_auto_click_selects_provider(self):
         app_model = (
