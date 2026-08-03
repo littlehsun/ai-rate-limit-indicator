@@ -48,6 +48,9 @@ struct BackendClient {
             process.arguments = [cliURL.path, "--json"]
             var environment = ProcessInfo.processInfo.environment
             environment["RATE_LIMIT_INDICATOR_CONFIG"] = configURL.path
+            if let codexHome = BackendPaths.codexHomePath {
+                environment["CODEX_HOME"] = codexHome
+            }
             if let grokHome = BackendPaths.grokHomePath {
                 environment["GROK_HOME"] = grokHome
             }
@@ -122,6 +125,15 @@ enum BackendPaths {
             environmentKey: "GROK_HOME",
             embeddedValue: Bundle.main.object(
                 forInfoDictionaryKey: "RateLimitIndicatorGrokHome"
+            ) as? String
+        )
+    }
+    static var codexHomePath: String? {
+        resolveOverride(
+            environment: ProcessInfo.processInfo.environment,
+            environmentKey: "CODEX_HOME",
+            embeddedValue: Bundle.main.object(
+                forInfoDictionaryKey: "RateLimitIndicatorCodexHome"
             ) as? String
         )
     }

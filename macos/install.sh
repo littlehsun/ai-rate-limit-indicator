@@ -10,6 +10,7 @@ ASSET_DIR="$APP_SUPPORT/assets"
 APP_DIR="${RATE_LIMIT_INDICATOR_APP_DIR:-$HOME/Applications/Rate Limit Indicator.app}"
 DEFAULT_CONFIG_FILE="$HOME/.config/rate-limit-indicator/providers.env"
 CONFIG_FILE="${RATE_LIMIT_INDICATOR_CONFIG:-$DEFAULT_CONFIG_FILE}"
+CODEX_HOME_OVERRIDE="${CODEX_HOME:-}"
 GROK_HOME_OVERRIDE="${GROK_HOME:-}"
 GROK_RATE_CACHE_OVERRIDE="${GROK_RATE_CACHE:-}"
 GROK_RATE_BILLING_URL_OVERRIDE="${GROK_RATE_BILLING_URL:-}"
@@ -46,6 +47,9 @@ STAGED_APP_EXECUTABLE="$APP_DIR/Contents/MacOS/.RateLimitIndicatorMac.new"
 DEFAULT_CONFIG_FILE="$(canonicalize_path "$DEFAULT_CONFIG_FILE")"
 CONFIG_FILE="$(canonicalize_path "$CONFIG_FILE")"
 CONFIG_DIR="$(dirname "$CONFIG_FILE")"
+if [[ -n "$CODEX_HOME_OVERRIDE" ]]; then
+    CODEX_HOME_OVERRIDE="$(canonicalize_path "$CODEX_HOME_OVERRIDE")"
+fi
 if [[ -n "$GROK_HOME_OVERRIDE" ]]; then
     GROK_HOME_OVERRIDE="$(canonicalize_path "$GROK_HOME_OVERRIDE")"
 fi
@@ -157,6 +161,10 @@ PLIST
     "$APP_DIR/Contents/Info.plist"
 /usr/bin/plutil -insert RateLimitIndicatorPythonPath -string "$PYTHON_BIN" \
     "$APP_DIR/Contents/Info.plist"
+if [[ -n "$CODEX_HOME_OVERRIDE" ]]; then
+    /usr/bin/plutil -insert RateLimitIndicatorCodexHome -string "$CODEX_HOME_OVERRIDE" \
+        "$APP_DIR/Contents/Info.plist"
+fi
 if [[ -n "$GROK_HOME_OVERRIDE" ]]; then
     /usr/bin/plutil -insert RateLimitIndicatorGrokHome -string "$GROK_HOME_OVERRIDE" \
         "$APP_DIR/Contents/Info.plist"

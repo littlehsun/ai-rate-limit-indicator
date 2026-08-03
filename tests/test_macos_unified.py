@@ -116,6 +116,7 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn('rm -f "$LEGACY_CODEX_PLIST"', mac_installer)
         self.assertIn("RateLimitIndicatorConfigPath", mac_installer)
         self.assertIn("RateLimitIndicatorPythonPath", mac_installer)
+        self.assertIn("RateLimitIndicatorCodexHome", mac_installer)
         self.assertIn("RateLimitIndicatorGrokHome", mac_installer)
         self.assertIn("RateLimitIndicatorGrokRateCache", mac_installer)
         self.assertIn("EnvironmentVariables.RATE_LIMIT_INDICATOR_CONFIG", mac_installer)
@@ -173,6 +174,7 @@ class UnifiedMacOSTests(unittest.TestCase):
             'environment["RATE_LIMIT_INDICATOR_CONFIG"] = configURL.path',
             backend,
         )
+        self.assertIn('environment["CODEX_HOME"] = codexHome', backend)
         self.assertIn('environment["GROK_HOME"] = grokHome', backend)
         self.assertIn('environment["GROK_RATE_CACHE"] = grokRateCache', backend)
 
