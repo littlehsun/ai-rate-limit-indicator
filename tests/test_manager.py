@@ -39,7 +39,8 @@ class ManagerTests(unittest.TestCase):
             env, log = self._environment(root)
             config = root / "providers.env"
             config.write_text(
-                "CODEX=true\nCLAUDE=false\nGROK=yes\nGEMINI=0\n",
+                "CODEX=true\nCODEX_RATE_SOURCE=local\n"
+                "CLAUDE=false\nGROK=yes\nGEMINI=0\n",
                 encoding="utf-8",
             )
             env["RATE_LIMIT_INDICATOR_CONFIG"] = str(config)
@@ -52,8 +53,31 @@ class ManagerTests(unittest.TestCase):
         self.assertIn("--user stop grok-rate-indicator.service", commands)
         self.assertIn("--user stop gemini-rate-indicator.service", commands)
         self.assertIn("--user restart rate-limit-indicator.service", commands)
-        self.assertIn("--user enable --now codex-rate-wham-poll.timer", commands)
+        self.assertIn("--user disable --now codex-rate-wham-poll.timer", commands)
         self.assertIn("--user disable --now gemini-rate-poll.timer", commands)
+
+    def test_apply_enables_codex_wham_timer_only_after_opt_in(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, log = self._environment(root)
+            config = root / "providers.env"
+            config.write_text(
+                "CODEX=true\nCODEX_RATE_SOURCE=wham\n"
+                "CLAUDE=false\nGROK=false\nGEMINI=false\n",
+                encoding="utf-8",
+            )
+            env["RATE_LIMIT_INDICATOR_CONFIG"] = str(config)
+
+            subprocess.run(
+                [MANAGER, "apply"],
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            commands = log.read_text(encoding="utf-8")
+
+        self.assertIn("--user enable --now codex-rate-wham-poll.timer", commands)
 
     def test_install_creates_one_autostart_and_disables_provider_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -74,6 +98,7 @@ class ManagerTests(unittest.TestCase):
 
             self.assertTrue(config.is_file())
             self.assertIn("GEMINI=true", config.read_text(encoding="utf-8"))
+            self.assertIn("CODEX_RATE_SOURCE=local", config.read_text(encoding="utf-8"))
             self.assertIn("DISPLAY_MODE=auto", config.read_text(encoding="utf-8"))
             self.assertIn(
                 "DISPLAY_PROVIDERS=codex,claude,grok,gemini",

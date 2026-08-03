@@ -44,8 +44,26 @@ read_enabled() {
         sed -n -E "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*([^#[:space:]]+).*$/\\1/p" \
             "$CONFIG_FILE" 2>/dev/null | tail -n 1
     )"
-    case "${value,,}" in
+    value="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')"
+    case "$value" in
         1|true|yes|on) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+read_config_value() {
+    local key="$1"
+    sed -n -E "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*([^#[:space:]]+).*$/\\1/p" \
+        "$CONFIG_FILE" 2>/dev/null | tail -n 1 | tr '[:upper:]' '[:lower:]'
+}
+
+timer_enabled_for_provider() {
+    local key="$1"
+    if [[ "$key" != "CODEX" ]]; then
+        return 0
+    fi
+    case "$(read_config_value CODEX_RATE_SOURCE)" in
+        auto|wham) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -66,8 +84,12 @@ apply_provider() {
     if read_enabled "$key"; then
         echo "Enabling $name data source..."
         if [[ -n "$timer" ]]; then
-            systemctl --user enable --now "$timer" \
-                || echo "Warning: could not enable $timer." >&2
+            if timer_enabled_for_provider "$key"; then
+                systemctl --user enable --now "$timer" \
+                    || echo "Warning: could not enable $timer." >&2
+            else
+                systemctl --user disable --now "$timer" 2>/dev/null || true
+            fi
         fi
     else
         echo "Disabling $name data source..."
@@ -125,7 +147,8 @@ disable_individual_autostarts() {
         desktop="$REAL_HOME/.config/autostart/$name-rate-indicator.desktop"
         [[ -f "$desktop" ]] || continue
         if grep -q '^X-GNOME-Autostart-enabled=' "$desktop"; then
-            sed -i 's/^X-GNOME-Autostart-enabled=.*/X-GNOME-Autostart-enabled=false/' "$desktop"
+            sed -i.bak 's/^X-GNOME-Autostart-enabled=.*/X-GNOME-Autostart-enabled=false/' "$desktop"
+            rm -f -- "$desktop.bak"
         else
             printf '\nX-GNOME-Autostart-enabled=false\n' >> "$desktop"
         fi
@@ -140,6 +163,7 @@ install_manager() {
         {
             echo "# Select the indicators managed at GNOME login."
             echo "CODEX=true"
+            echo "CODEX_RATE_SOURCE=local"
             echo "CLAUDE=true"
             echo "GROK=true"
             echo "GEMINI=true"
@@ -148,6 +172,10 @@ install_manager() {
             echo "DROPDOWN_PROVIDERS=codex,claude,grok,gemini"
             echo "PROVIDER_ORDER=codex,claude,grok,gemini"
         } > "$CONFIG_FILE"
+    fi
+    if ! grep -Eq '^[[:space:]]*CODEX_RATE_SOURCE=' "$CONFIG_FILE"; then
+        printf '\n# local (default), auto, or wham; auto/wham opt in to network polling.\n' >> "$CONFIG_FILE"
+        printf 'CODEX_RATE_SOURCE=local\n' >> "$CONFIG_FILE"
     fi
     if ! grep -q '^DISPLAY_MODE=' "$CONFIG_FILE"; then
         legacy_display="$(
@@ -173,7 +201,8 @@ install_manager() {
     if ! grep -q '^PROVIDER_ORDER=' "$CONFIG_FILE"; then
         printf 'PROVIDER_ORDER=codex,claude,grok,gemini\n' >> "$CONFIG_FILE"
     fi
-    sed -i '/^DISPLAY_PROVIDER=/d' "$CONFIG_FILE"
+    sed -i.bak '/^DISPLAY_PROVIDER=/d' "$CONFIG_FILE"
+    rm -f -- "$CONFIG_FILE.bak"
     chmod 600 "$CONFIG_FILE"
 
     if [[ "$SOURCE_SCRIPT" != "$INSTALLED_SCRIPT" ]]; then
