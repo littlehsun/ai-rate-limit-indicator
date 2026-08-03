@@ -175,6 +175,30 @@ class ManagerTests(unittest.TestCase):
                 config.read_text(encoding="utf-8"),
             )
 
+    def test_install_preserves_spaced_codex_source_assignment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env, _ = self._environment(root)
+            config = root / ".config/rate-limit-indicator/providers.env"
+            config.parent.mkdir(parents=True)
+            config.write_text(
+                "CODEX=true\nCODEX_RATE_SOURCE = auto\n"
+                "CLAUDE=false\nGROK=false\nGEMINI=false\n",
+                encoding="utf-8",
+            )
+
+            subprocess.run(
+                [MANAGER, "install"],
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            contents = config.read_text(encoding="utf-8")
+            self.assertIn("CODEX_RATE_SOURCE = auto", contents)
+            self.assertEqual(contents.count("CODEX_RATE_SOURCE"), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

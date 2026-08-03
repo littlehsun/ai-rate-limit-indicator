@@ -128,7 +128,7 @@ if [[ ! -e "$CONFIG_FILE" ]]; then
     } > "$CONFIG_FILE"
     config_file_created=true
 fi
-if ! grep -Eq '^[[:space:]]*CODEX_RATE_SOURCE=' "$CONFIG_FILE"; then
+if ! grep -Eq '^[[:space:]]*CODEX_RATE_SOURCE[[:space:]]*=' "$CONFIG_FILE"; then
     printf '\n# local (default), auto, or wham; auto/wham opt in to network polling.\n' >> "$CONFIG_FILE"
     printf 'CODEX_RATE_SOURCE=%s\n' "$legacy_codex_source" >> "$CONFIG_FILE"
 fi

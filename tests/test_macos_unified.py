@@ -130,6 +130,7 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn('echo "CODEX_RATE_SOURCE=$legacy_codex_source"', mac_installer)
         self.assertIn("LEGACY_CODEX_ENV", mac_installer)
         self.assertIn('auto|wham) ;;', mac_installer)
+        self.assertIn("CODEX_RATE_SOURCE[[:space:]]*=", mac_installer)
         self.assertIn("os.path.realpath(os.path.expanduser(sys.argv[1]))", mac_installer)
         self.assertIn('APP_DIR="$(canonicalize_path "$APP_DIR")"', mac_installer)
         self.assertLess(
