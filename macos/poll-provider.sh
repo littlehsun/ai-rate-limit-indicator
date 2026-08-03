@@ -28,8 +28,17 @@ is_enabled() {
 
 config_value() {
     local key="$1"
-    sed -n -E "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*([^#[:space:]]+).*$/\\1/p" \
-        "$CONFIG_FILE" 2>/dev/null | tail -n 1 | tr '[:upper:]' '[:lower:]'
+    local value
+    value="$(
+        sed -n -E "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*([^#[:space:]]+).*$/\\1/p" \
+            "$CONFIG_FILE" 2>/dev/null | tail -n 1 | tr '[:upper:]' '[:lower:]'
+    )"
+    if [[ ${#value} -ge 2 ]]; then
+        case "$value" in
+            \"*\"|\'*\') value="${value:1:${#value}-2}" ;;
+        esac
+    fi
+    printf '%s' "$value"
 }
 
 load_wham_environment() {

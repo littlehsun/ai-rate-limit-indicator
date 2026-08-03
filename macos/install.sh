@@ -41,6 +41,16 @@ canonicalize_path() {
 canonicalize_path_list() {
     python3 -c 'import os, sys; print(",".join(os.path.realpath(os.path.expanduser(item.strip())) for item in sys.argv[1].split(",") if item.strip()))' "$1"
 }
+normalize_config_value() {
+    local value
+    value="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+    if [[ ${#value} -ge 2 ]]; then
+        case "$value" in
+            \"*\"|\'*\') value="${value:1:${#value}-2}" ;;
+        esac
+    fi
+    printf '%s' "$value"
+}
 PYTHON_BIN="$(command -v python3)"
 if [[ "$PYTHON_BIN" != /* || ! -x "$PYTHON_BIN" ]]; then
     echo "python3 must resolve to an executable absolute path: $PYTHON_BIN" >&2
@@ -107,9 +117,10 @@ legacy_codex_source=""
 if [[ -f "$LEGACY_CODEX_ENV" ]]; then
     legacy_codex_source="$(
         sed -n -E 's/^[[:space:]]*CODEX_RATE_SOURCE[[:space:]]*=[[:space:]]*([^#[:space:]]+).*$/\1/p' \
-            "$LEGACY_CODEX_ENV" | tail -n 1 | tr '[:upper:]' '[:lower:]'
+            "$LEGACY_CODEX_ENV" | tail -n 1
     )"
 fi
+legacy_codex_source="$(normalize_config_value "$legacy_codex_source")"
 case "$legacy_codex_source" in
     auto|wham) ;;
     *) legacy_codex_source=local ;;

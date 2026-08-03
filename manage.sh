@@ -41,11 +41,7 @@ usage() {
 read_enabled() {
     local key="$1"
     local value
-    value="$(
-        sed -n -E "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*([^#[:space:]]+).*$/\\1/p" \
-            "$CONFIG_FILE" 2>/dev/null | tail -n 1
-    )"
-    value="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')"
+    value="$(read_config_value "$key")"
     case "$value" in
         1|true|yes|on) return 0 ;;
         *) return 1 ;;
@@ -55,9 +51,18 @@ read_enabled() {
 read_config_value() {
     local key="$1"
     local file="${2:-$CONFIG_FILE}"
+    local value
     [[ -f "$file" ]] || return 0
-    sed -n -E "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*([^#[:space:]]+).*$/\\1/p" \
-        "$file" 2>/dev/null | tail -n 1 | tr '[:upper:]' '[:lower:]'
+    value="$(
+        sed -n -E "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*([^#[:space:]]+).*$/\\1/p" \
+            "$file" 2>/dev/null | tail -n 1 | tr '[:upper:]' '[:lower:]'
+    )"
+    if [[ ${#value} -ge 2 ]]; then
+        case "$value" in
+            \"*\"|\'*\') value="${value:1:${#value}-2}" ;;
+        esac
+    fi
+    printf '%s' "$value"
 }
 
 timer_enabled_for_provider() {

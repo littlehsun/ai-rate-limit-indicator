@@ -26,6 +26,19 @@ from claude_oauth import (
 
 
 class AdapterTests(unittest.TestCase):
+    def test_manager_config_strips_matching_value_quotes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp) / "providers.env"
+            config.write_text(
+                'CODEX_RATE_SOURCE="auto"\nDISPLAY_MODE=\'custom\'\n',
+                encoding="utf-8",
+            )
+
+            values = read_manager_config(config)
+
+        self.assertEqual(values["CODEX_RATE_SOURCE"], "auto")
+        self.assertEqual(values["DISPLAY_MODE"], "custom")
+
     def test_config_selects_enabled_providers_in_stable_order(self):
         with tempfile.TemporaryDirectory() as tmp:
             config = Path(tmp) / "providers.env"

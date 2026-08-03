@@ -51,7 +51,14 @@ def read_manager_config(path: Optional[Path] = None) -> dict[str, str]:
         if "=" not in stripped:
             continue
         key, value = stripped.split("=", 1)
-        values[key.strip().upper()] = value.strip()
+        normalized = value.strip()
+        if (
+            len(normalized) >= 2
+            and normalized[0] == normalized[-1]
+            and normalized[0] in {"'", '"'}
+        ):
+            normalized = normalized[1:-1]
+        values[key.strip().upper()] = normalized
     return values
 
 
