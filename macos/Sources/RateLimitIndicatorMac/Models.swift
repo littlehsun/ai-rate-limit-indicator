@@ -46,6 +46,18 @@ struct ProviderSnapshot: Codable, Identifiable, Hashable {
             $0.quotaCadenceRank < $1.quotaCadenceRank
         }
     }
+
+    func markingStale() -> ProviderSnapshot {
+        ProviderSnapshot(
+            provider: provider,
+            label: label,
+            updatedAt: updatedAt,
+            windows: windows,
+            status: "stale",
+            error: error,
+            extras: extras
+        )
+    }
 }
 
 struct SnapshotPayload: Codable {

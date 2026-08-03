@@ -9,8 +9,8 @@ COLLECTOR_DIR="$BACKEND_DIR/collectors"
 ASSET_DIR="$APP_SUPPORT/assets"
 APP_DIR="${RATE_LIMIT_INDICATOR_APP_DIR:-$HOME/Applications/Rate Limit Indicator.app}"
 APP_EXECUTABLE="$APP_DIR/Contents/MacOS/RateLimitIndicatorMac"
-CONFIG_DIR="$HOME/.config/rate-limit-indicator"
-CONFIG_FILE="${RATE_LIMIT_INDICATOR_CONFIG:-$CONFIG_DIR/providers.env}"
+CONFIG_FILE="${RATE_LIMIT_INDICATOR_CONFIG:-$HOME/.config/rate-limit-indicator/providers.env}"
+CONFIG_DIR="$(dirname "$CONFIG_FILE")"
 LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
 LOG_DIR="$HOME/Library/Logs/RateLimitIndicator"
 LEGACY_CODEX_PLIST="$LAUNCH_AGENTS/com.hsun.codex-rate-menubar.plist"
@@ -106,6 +106,8 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
+/usr/bin/plutil -insert RateLimitIndicatorConfigPath -string "$CONFIG_FILE" \
+    "$APP_DIR/Contents/Info.plist"
 
 echo "[4/5] Installing Codex and Grok polling LaunchAgents..."
 mkdir -p "$LAUNCH_AGENTS" "$LOG_DIR"
@@ -137,6 +139,9 @@ for provider in codex grok; do
 </dict>
 </plist>
 PLIST
+    /usr/bin/plutil -insert EnvironmentVariables -dictionary "$plist"
+    /usr/bin/plutil -insert EnvironmentVariables.RATE_LIMIT_INDICATOR_CONFIG \
+        -string "$CONFIG_FILE" "$plist"
     launchctl bootout "gui/$UID" "$plist" 2>/dev/null || true
     launchctl bootstrap "gui/$UID" "$plist"
 done

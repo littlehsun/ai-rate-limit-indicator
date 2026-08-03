@@ -19,13 +19,19 @@ enum BackendError: LocalizedError {
 
 struct BackendClient {
     let cliURL: URL
+    let configURL: URL
 
-    init(cliURL: URL = BackendPaths.cliURL) {
+    init(
+        cliURL: URL = BackendPaths.cliURL,
+        configURL: URL = BackendPaths.configURL
+    ) {
         self.cliURL = cliURL
+        self.configURL = configURL
     }
 
     func fetchSnapshots() async throws -> [ProviderSnapshot] {
         let cliURL = self.cliURL
+        let configURL = self.configURL
         return try await Task.detached(priority: .utility) {
             guard FileManager.default.fileExists(atPath: cliURL.path) else {
                 throw BackendError.missingCLI(cliURL.path)
@@ -36,6 +42,9 @@ struct BackendClient {
             let standardError = Pipe()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = ["python3", cliURL.path, "--json"]
+            var environment = ProcessInfo.processInfo.environment
+            environment["RATE_LIMIT_INDICATOR_CONFIG"] = configURL.path
+            process.environment = environment
             process.standardOutput = standardOutput
             process.standardError = standardError
 
@@ -73,6 +82,26 @@ enum BackendPaths {
     static let backendURL = appSupportURL.appendingPathComponent("backend", isDirectory: true)
     static let cliURL = backendURL.appendingPathComponent("cli.py")
     static let assetsURL = appSupportURL.appendingPathComponent("assets", isDirectory: true)
-    static let configURL = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".config/rate-limit-indicator/providers.env")
+    static var configURL: URL {
+        resolveConfigURL(
+            environment: ProcessInfo.processInfo.environment,
+            embeddedPath: Bundle.main.object(
+                forInfoDictionaryKey: "RateLimitIndicatorConfigPath"
+            ) as? String
+        )
+    }
+
+    static func resolveConfigURL(
+        environment: [String: String],
+        embeddedPath: String?
+    ) -> URL {
+        if let path = environment["RATE_LIMIT_INDICATOR_CONFIG"], !path.isEmpty {
+            return URL(fileURLWithPath: path)
+        }
+        if let path = embeddedPath, !path.isEmpty {
+            return URL(fileURLWithPath: path)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".config/rate-limit-indicator/providers.env")
+    }
 }

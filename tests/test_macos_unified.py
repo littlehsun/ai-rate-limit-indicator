@@ -39,8 +39,27 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn("LSUIElement", mac_installer)
         self.assertIn("poll-provider.sh", mac_installer)
         self.assertIn("com.hsun.codex-rate-menubar", mac_installer)
-        self.assertIn('launchctl bootout "gui/$UID/com.hsun.codex-rate-menubar"', mac_installer)
+        self.assertIn(
+            'launchctl bootout "gui/$UID/com.hsun.codex-rate-menubar"',
+            mac_installer,
+        )
         self.assertIn('rm -f "$LEGACY_CODEX_PLIST"', mac_installer)
+        self.assertIn("RateLimitIndicatorConfigPath", mac_installer)
+        self.assertIn("EnvironmentVariables.RATE_LIMIT_INDICATOR_CONFIG", mac_installer)
+
+    def test_refresh_failure_marks_retained_snapshots_stale(self):
+        app_model = (
+            MACOS / "Sources/RateLimitIndicatorMac/AppModel.swift"
+        ).read_text(encoding="utf-8")
+        backend = (
+            MACOS / "Sources/RateLimitIndicatorMac/BackendClient.swift"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("snapshots.map { $0.markingStale() }", app_model)
+        self.assertIn(
+            'environment["RATE_LIMIT_INDICATOR_CONFIG"] = configURL.path',
+            backend,
+        )
 
     def test_menu_panel_has_intrinsic_content_and_recoverable_empty_state(self):
         views = (

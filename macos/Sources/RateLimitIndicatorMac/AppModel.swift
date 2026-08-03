@@ -40,7 +40,9 @@ final class AppModel: ObservableObject {
             errorMessage = nil
             resolveIndicatorSnapshots()
         } catch {
+            snapshots = snapshots.map { $0.markingStale() }
             errorMessage = error.localizedDescription
+            resolveIndicatorSnapshots()
         }
     }
 

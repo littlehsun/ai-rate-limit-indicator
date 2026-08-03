@@ -80,6 +80,34 @@ final class BackendContractTests: XCTestCase {
         )
     }
 
+    func testSnapshotCanBeMarkedStaleAfterRefreshFailure() {
+        let fresh = snapshot(
+            provider: "codex",
+            percent: 42,
+            updatedAt: "2026-07-30T05:00:00Z"
+        )
+
+        let stale = fresh.markingStale()
+
+        XCTAssertEqual(stale.status, "stale")
+        XCTAssertEqual(stale.windows, fresh.windows)
+        XCTAssertEqual(stale.updatedAt, fresh.updatedAt)
+    }
+
+    func testCustomConfigPathResolution() {
+        let embedded = BackendPaths.resolveConfigURL(
+            environment: [:],
+            embeddedPath: "/tmp/custom providers.env"
+        )
+        let overridden = BackendPaths.resolveConfigURL(
+            environment: ["RATE_LIMIT_INDICATOR_CONFIG": "/tmp/override.env"],
+            embeddedPath: "/tmp/custom providers.env"
+        )
+
+        XCTAssertEqual(embedded.path, "/tmp/custom providers.env")
+        XCTAssertEqual(overridden.path, "/tmp/override.env")
+    }
+
     private func snapshot(
         provider: String,
         percent: Int,
