@@ -46,6 +46,7 @@ class UnifiedMacOSTests(unittest.TestCase):
                     "RATE_LIMIT_INDICATOR_PYTHON": str(fake_python),
                     "RATE_LIMIT_INDICATOR_APP_SUPPORT": str(temp_dir),
                     "CODEX_RATE_WHAM_ENV": str(wham_env),
+                    "CODEX_RATE_AUTH_FALLBACK": str(temp_dir / "fallback-auth.json"),
                 }
             )
 
@@ -136,6 +137,23 @@ class UnifiedMacOSTests(unittest.TestCase):
             self.assertEqual(
                 marker.read_text(encoding="utf-8").splitlines()[-1],
                 str(explicit_cache),
+            )
+
+            wham_env.write_text(
+                "CHATGPT_ACCESS_TOKEN=test-token\n",
+                encoding="utf-8",
+            )
+            fallback_result = subprocess.run(
+                ["bash", str(MACOS / "poll-provider.sh"), "codex"],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertEqual(fallback_result.returncode, 0, fallback_result.stderr)
+            self.assertEqual(
+                marker.read_text(encoding="utf-8").splitlines()[2],
+                str(temp_dir / "fallback-auth.json"),
             )
 
     def test_provider_pollers_accept_quoted_enabled_flags(self):
@@ -268,7 +286,7 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn("plutil -replace StandardErrorPath", mac_installer)
         self.assertNotIn("<string>$APP_SUPPORT", mac_installer)
         self.assertNotIn("<string>$LOG_DIR", mac_installer)
-        self.assertIn("EnvironmentVariables.CODEX_AUTH_FILE", mac_installer)
+        self.assertIn("EnvironmentVariables.CODEX_RATE_AUTH_FALLBACK", mac_installer)
         self.assertIn("EnvironmentVariables.CODEX_RATE_WHAM_CACHE", mac_installer)
         self.assertIn('"$CODEX_HOME_OVERRIDE/auth.json"', mac_installer)
         self.assertIn("EnvironmentVariables.GROK_HOME", mac_installer)

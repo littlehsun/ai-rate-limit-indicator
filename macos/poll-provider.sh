@@ -218,6 +218,9 @@ case "$provider" in
             *) exit 0 ;;
         esac
         load_wham_environment
+        if [[ -z "${CODEX_AUTH_FILE:-}" && -n "${CODEX_RATE_AUTH_FALLBACK:-}" ]]; then
+            export CODEX_AUTH_FILE="$CODEX_RATE_AUTH_FALLBACK"
+        fi
         exec "$PYTHON_BIN" "$APP_SUPPORT/backend/collectors/wham.py" --once
         ;;
     grok)

@@ -310,7 +310,7 @@ PLIST
     /usr/bin/plutil -insert EnvironmentVariables.RATE_LIMIT_INDICATOR_PYTHON \
         -string "$PYTHON_BIN" "$plist"
     if [[ "$provider" == "codex" && -n "$CODEX_HOME_OVERRIDE" ]]; then
-        /usr/bin/plutil -insert EnvironmentVariables.CODEX_AUTH_FILE \
+        /usr/bin/plutil -insert EnvironmentVariables.CODEX_RATE_AUTH_FALLBACK \
             -string "$CODEX_HOME_OVERRIDE/auth.json" "$plist"
     fi
     if [[ "$provider" == "codex" && -n "$CODEX_WHAM_CACHE_OVERRIDE" ]]; then
