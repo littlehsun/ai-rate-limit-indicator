@@ -26,6 +26,23 @@ from claude_oauth import (
 
 
 class AdapterTests(unittest.TestCase):
+    def test_manager_config_strips_matching_value_quotes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp) / "providers.env"
+            config.write_text(
+                'export CODEX=\'true\'\n'
+                'export CODEX_RATE_SOURCE="auto"\n'
+                "DISPLAY_MODE='custom'\n",
+                encoding="utf-8",
+            )
+
+            values = read_manager_config(config)
+            enabled = enabled_providers(config)
+
+        self.assertEqual(values["CODEX_RATE_SOURCE"], "auto")
+        self.assertEqual(values["DISPLAY_MODE"], "custom")
+        self.assertEqual(enabled, ("codex",))
+
     def test_config_selects_enabled_providers_in_stable_order(self):
         with tempfile.TemporaryDirectory() as tmp:
             config = Path(tmp) / "providers.env"
@@ -72,9 +89,9 @@ class AdapterTests(unittest.TestCase):
             config = Path(tmp) / "providers.env"
             config.write_text(
                 "CODEX=true\nCLAUDE=true\nGROK=true\nGEMINI=true\n"
-                "DISPLAY_MODE=auto\nDISPLAY_PROVIDERS=codex,grok\n"
-                "DROPDOWN_PROVIDERS=codex,claude,grok\n"
-                "PROVIDER_ORDER=codex,grok,claude,gemini\n",
+                "export DISPLAY_MODE=auto\nexport DISPLAY_PROVIDERS=codex,grok\n"
+                "export DROPDOWN_PROVIDERS=codex,claude,grok\n"
+                "export PROVIDER_ORDER=codex,grok,claude,gemini\n",
                 encoding="utf-8",
             )
 
@@ -97,6 +114,11 @@ class AdapterTests(unittest.TestCase):
                 provider_display_order(read_manager_config(config)),
                 ("grok", "claude", "codex", "gemini"),
             )
+            saved = config.read_text(encoding="utf-8")
+            self.assertNotIn("export DISPLAY_", saved)
+            self.assertNotIn("export DROPDOWN_PROVIDERS=", saved)
+            self.assertNotIn("export PROVIDER_ORDER=", saved)
+            self.assertEqual(saved.count("DISPLAY_MODE="), 1)
             self.assertEqual(config.stat().st_mode & 0o777, 0o600)
 
     def test_codex_adapter_keeps_reset_credit_expiration(self):
@@ -122,11 +144,17 @@ class AdapterTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            with patch.dict("os.environ", {"XDG_CACHE_HOME": tmp}):
+            with patch.dict("os.environ", {"XDG_CACHE_HOME": tmp}), patch(
+                "adapters.read_manager_config",
+                return_value={"CODEX_RATE_SOURCE": "auto"},
+            ):
                 snapshot = load_codex()
 
+        expected_expiration = datetime.fromisoformat(
+            "2026-08-12T18:12:36.625939+00:00"
+        ).astimezone().strftime("%Y-%m-%d %H:%M")
         self.assertEqual(snapshot.extras[0], "Reset credits: 1")
-        self.assertIn("1. expires 2026-08-13", snapshot.extras[1])
+        self.assertEqual(snapshot.extras[1], f"1. expires {expected_expiration}")
 
     def test_codex_adapter_keeps_reset_credit_row_when_api_has_no_data(self):
         class Snapshot:
@@ -136,10 +164,25 @@ class AdapterTests(unittest.TestCase):
             reset_credits_available = None
             reset_credit_expirations = ()
 
-        with patch("wham.read_wham_snapshot", return_value=Snapshot()):
+        with patch(
+            "adapters.read_manager_config",
+            return_value={"CODEX_RATE_SOURCE": "auto"},
+        ), patch("wham.read_wham_snapshot", return_value=Snapshot()):
             snapshot = load_codex()
 
         self.assertEqual(snapshot.extras, ("Reset credits: --",))
+
+    def test_codex_local_source_never_reads_wham_cache(self):
+        with patch(
+            "adapters.read_manager_config",
+            return_value={"CODEX_RATE_SOURCE": "local"},
+        ), patch(
+            "wham.read_wham_snapshot",
+            side_effect=AssertionError("wham cache should not be read"),
+        ), patch("codex_rate.find_latest_snapshot", return_value=None):
+            snapshot = load_codex()
+
+        self.assertEqual(snapshot.status, "no_data")
 
     def test_grok_adapter_labels_weekly_window_as_7d(self):
         class Window:

@@ -6,13 +6,14 @@ A unified rate-limit indicator for Codex, Claude Code, Grok Build, and
 Gemini/AGY.
 
 The project keeps each provider's proven data collector and normalizes their
-usage into one shared snapshot model. On GNOME, a single AppIndicator displays
-the selected providers, their 5H and 7D usage, reset countdowns, and provider
-details.
+usage into one shared snapshot model. The GNOME AppIndicator and native macOS
+SwiftUI app consume that same backend and display the selected providers, their
+5H and 7D usage, reset countdowns, and provider details.
 
 ## Features
 
 - One GNOME panel indicator for all enabled providers.
+- One native macOS menu-bar app using the same normalized backend.
 - Auto mode follows the most recently changed fresh 7D quota.
 - Custom mode supports multiple providers and a configurable display order.
 - Independent controls for panel visibility and dropdown visibility.
@@ -24,12 +25,12 @@ details.
 
 ## Providers
 
-| Provider | Unified GNOME UI | macOS | Data source |
+| Provider | Unified GNOME UI | Unified macOS UI | Data source |
 | --- | --- | --- | --- |
-| [Codex](providers/codex/README.md) | Adapter | Swift menu bar | Local Codex rollout data; optional ChatGPT quota API |
-| [Claude](providers/claude/README.md) | Adapter | — | Claude OAuth usage API |
-| [Grok](providers/grok/README.md) | Adapter | — | Grok CLI billing API, with 7D and monthly windows |
-| [Gemini](providers/gemini/README.md) | Adapter | — | AGY localhost quota API with last-known snapshot cache |
+| [Codex](providers/codex/README.md) | Adapter | SwiftUI | Local Codex rollout data; optional ChatGPT quota API |
+| [Claude](providers/claude/README.md) | Adapter | SwiftUI | Claude OAuth usage API |
+| [Grok](providers/grok/README.md) | Adapter | SwiftUI | Grok CLI billing API, with 7D and monthly windows |
+| [Gemini](providers/gemini/README.md) | Adapter | SwiftUI | AGY localhost quota API with last-known snapshot cache |
 
 Gemini prefers the same `RetrieveUserQuotaSummary` endpoint used by AGY's
 `/usage` screen. It exposes Gemini and Claude/GPT 5H and 7D pools. If AGY is not
@@ -39,11 +40,10 @@ format.
 
 ## Requirements
 
-- Linux with a GNOME-compatible AppIndicator implementation.
-- Python 3.
-- `python3-gi` and AppIndicator3 Python bindings.
-- `systemd --user`.
-- `lsof` for AGY localhost port discovery.
+- Linux: GNOME-compatible AppIndicator, Python 3, AppIndicator3 Python
+  bindings, and `systemd --user`.
+- macOS: macOS 14 or newer, Python 3, and Xcode Command Line Tools.
+- `lsof` for AGY localhost port discovery on either platform.
 - The corresponding provider CLIs or local usage data for the providers you
   enable.
 
@@ -70,13 +70,15 @@ Install an individual provider:
 ./install.sh gemini
 ```
 
-Install the Codex macOS menu-bar app:
+Install the unified native macOS menu-bar app:
 
 ```bash
-./install.sh codex-macos
+./install.sh macos
 ```
 
-The installer creates one GNOME login command:
+`./install.sh codex-macos` remains an alias for compatibility.
+
+The Linux installer creates one GNOME login command:
 
 ```text
 ~/.local/bin/rate-limit-indicators start
@@ -84,6 +86,11 @@ The installer creates one GNOME login command:
 
 It disables the standalone GNOME indicator services while retaining the
 provider polling timers needed by the unified UI.
+
+The macOS installer builds `Rate Limit Indicator.app`, installs the same Python
+backend under `~/Library/Application Support/RateLimitIndicator`, and uses
+LaunchAgents for the existing Codex and Grok pollers. The settings window uses
+macOS `SMAppService` for the optional Launch at Login toggle.
 
 ## Configuration
 
@@ -101,6 +108,10 @@ CODEX=true
 CLAUDE=true
 GROK=true
 GEMINI=true
+
+# Codex source: local makes no network requests. auto/wham explicitly opt in
+# to polling undocumented ChatGPT quota endpoints with the existing Codex token.
+CODEX_RATE_SOURCE=local
 
 # auto or custom
 DISPLAY_MODE=custom
@@ -123,7 +134,7 @@ current selection remains stable when nothing changes.
 `PROVIDER_ORDER` preserves the complete order, including providers currently
 hidden from either surface.
 
-The same options are available from `Display settings…` in the dropdown menu.
+The same options are available from `Display settings…` in both platform UIs.
 
 Apply configuration changes immediately:
 
@@ -176,8 +187,8 @@ as unavailable.
 ```
 
 The suite covers all provider parsers, the unified adapters and UI behavior,
-installer/manager integration, and shell syntax. The macOS smoke test is skipped
-automatically when `swiftc` is unavailable.
+installer/manager integration, and shell syntax. The unified SwiftUI app is
+built by the suite when it runs on macOS with Swift available.
 
 ## Repository layout
 
@@ -195,8 +206,10 @@ automatically when `swiftc` is unavailable.
 │   ├── indicator.py
 │   ├── models.py
 │   └── tests/
-├── docs/
-│   └── architecture.md
+├── macos/
+│   ├── Package.swift
+│   ├── Sources/
+│   └── install.sh
 ├── scripts/
 │   └── test-all.sh
 ├── manage.sh

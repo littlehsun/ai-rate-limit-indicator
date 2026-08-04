@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
-    echo "Usage: $0 {all|codex|claude|grok|gemini|manager|codex-macos}"
+    echo "Usage: $0 {all|codex|claude|grok|gemini|manager|macos|codex-macos}"
 }
 
 install_provider() {
@@ -21,8 +21,8 @@ install_provider() {
         gemini)
             bash "$ROOT_DIR/providers/gemini/ubuntu-indicator/install.sh"
             ;;
-        codex-macos)
-            bash "$ROOT_DIR/providers/codex/macos-menubar/install.sh"
+        macos|codex-macos)
+            bash "$ROOT_DIR/macos/install.sh"
             ;;
         *)
             usage >&2
@@ -42,9 +42,9 @@ case "$target" in
         bash "$ROOT_DIR/unified-indicator/install.sh"
         bash "$ROOT_DIR/manage.sh" install
         ;;
-    codex|claude|grok|gemini|codex-macos)
+    codex|claude|grok|gemini|macos|codex-macos)
         install_provider "$target"
-        if [[ "$target" != "codex-macos" ]]; then
+        if [[ "$target" != "macos" && "$target" != "codex-macos" ]]; then
             bash "$ROOT_DIR/unified-indicator/install.sh"
             bash "$ROOT_DIR/manage.sh" install
         fi

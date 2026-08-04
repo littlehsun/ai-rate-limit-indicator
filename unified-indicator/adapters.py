@@ -37,6 +37,13 @@ def default_manager_config() -> Path:
     return Path.home() / ".config" / "rate-limit-indicator" / "providers.env"
 
 
+def _normalize_config_key(raw_key: str) -> str:
+    key_parts = raw_key.strip().split(None, 1)
+    if len(key_parts) == 2 and key_parts[0].lower() == "export":
+        return key_parts[1].upper()
+    return raw_key.strip().upper()
+
+
 def read_manager_config(path: Optional[Path] = None) -> dict[str, str]:
     config_path = path or Path(
         os.environ.get("RATE_LIMIT_INDICATOR_CONFIG", default_manager_config())
@@ -51,7 +58,14 @@ def read_manager_config(path: Optional[Path] = None) -> dict[str, str]:
         if "=" not in stripped:
             continue
         key, value = stripped.split("=", 1)
-        values[key.strip().upper()] = value.strip()
+        normalized = value.strip()
+        if (
+            len(normalized) >= 2
+            and normalized[0] == normalized[-1]
+            and normalized[0] in {"'", '"'}
+        ):
+            normalized = normalized[1:-1]
+        values[_normalize_config_key(key)] = normalized
     return values
 
 
@@ -152,7 +166,7 @@ def write_display_settings(
     output = []
     for line in lines:
         stripped = line.split("#", 1)[0].strip()
-        key = stripped.split("=", 1)[0].strip().upper() if "=" in stripped else ""
+        key = _normalize_config_key(stripped.split("=", 1)[0]) if "=" in stripped else ""
         if key not in updates:
             output.append(line)
             continue
@@ -222,8 +236,11 @@ def load_codex() -> ProviderSnapshot:
     from codex_rate import default_codex_home, find_latest_snapshot
     from wham import default_wham_cache_path, format_wham_timestamp, read_wham_snapshot
 
-    snapshot = read_wham_snapshot(Path(default_wham_cache_path()))
-    if snapshot is None:
+    source = read_manager_config().get("CODEX_RATE_SOURCE", "local").lower()
+    snapshot = None
+    if source in {"auto", "wham"}:
+        snapshot = read_wham_snapshot(Path(default_wham_cache_path()))
+    if snapshot is None and source != "wham":
         snapshot = find_latest_snapshot(
             Path(os.environ.get("CODEX_HOME", default_codex_home()))
         )

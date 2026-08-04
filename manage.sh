@@ -11,6 +11,7 @@ fi
 
 CONFIG_DIR="$REAL_HOME/.config/rate-limit-indicator"
 CONFIG_FILE="${RATE_LIMIT_INDICATOR_CONFIG:-$CONFIG_DIR/providers.env}"
+LEGACY_CODEX_ENV="$REAL_HOME/.config/codex-rate-indicator/wham.env"
 APP_DIR="$REAL_HOME/.local/share/rate-limit-indicator"
 INSTALLED_SCRIPT="$APP_DIR/manage.sh"
 BIN="$REAL_HOME/.local/bin/rate-limit-indicators"
@@ -40,12 +41,42 @@ usage() {
 read_enabled() {
     local key="$1"
     local value
-    value="$(
-        sed -n -E "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*([^#[:space:]]+).*$/\\1/p" \
-            "$CONFIG_FILE" 2>/dev/null | tail -n 1
-    )"
-    case "${value,,}" in
+    value="$(read_config_value "$key")"
+    case "$value" in
         1|true|yes|on) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+read_config_value() {
+    local key="$1"
+    local file="${2:-$CONFIG_FILE}"
+    local value
+    [[ -f "$file" ]] || return 0
+    value="$(
+        sed -n -E "s/^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=[[:space:]]*([^#[:space:]]+).*$/\\2/p" \
+            "$file" 2>/dev/null | tail -n 1 | tr '[:upper:]' '[:lower:]'
+    )"
+    if [[ ${#value} -ge 2 ]]; then
+        case "$value" in
+            \"*\"|\'*\') value="${value:1:${#value}-2}" ;;
+        esac
+    fi
+    printf '%s' "$value"
+}
+
+has_config_assignment() {
+    local key="$1"
+    grep -Eq "^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=" "$CONFIG_FILE"
+}
+
+timer_enabled_for_provider() {
+    local key="$1"
+    if [[ "$key" != "CODEX" ]]; then
+        return 0
+    fi
+    case "$(read_config_value CODEX_RATE_SOURCE)" in
+        auto|wham) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -66,8 +97,12 @@ apply_provider() {
     if read_enabled "$key"; then
         echo "Enabling $name data source..."
         if [[ -n "$timer" ]]; then
-            systemctl --user enable --now "$timer" \
-                || echo "Warning: could not enable $timer." >&2
+            if timer_enabled_for_provider "$key"; then
+                systemctl --user enable --now "$timer" \
+                    || echo "Warning: could not enable $timer." >&2
+            else
+                systemctl --user disable --now "$timer" 2>/dev/null || true
+            fi
         fi
     else
         echo "Disabling $name data source..."
@@ -125,7 +160,8 @@ disable_individual_autostarts() {
         desktop="$REAL_HOME/.config/autostart/$name-rate-indicator.desktop"
         [[ -f "$desktop" ]] || continue
         if grep -q '^X-GNOME-Autostart-enabled=' "$desktop"; then
-            sed -i 's/^X-GNOME-Autostart-enabled=.*/X-GNOME-Autostart-enabled=false/' "$desktop"
+            sed -i.bak 's/^X-GNOME-Autostart-enabled=.*/X-GNOME-Autostart-enabled=false/' "$desktop"
+            rm -f -- "$desktop.bak"
         else
             printf '\nX-GNOME-Autostart-enabled=false\n' >> "$desktop"
         fi
@@ -135,11 +171,17 @@ disable_individual_autostarts() {
 install_manager() {
     mkdir -p "$CONFIG_DIR" "$APP_DIR" "$REAL_HOME/.local/bin" "$REAL_HOME/.config/autostart"
     chmod 700 "$CONFIG_DIR"
+    legacy_codex_source="$(read_config_value CODEX_RATE_SOURCE "$LEGACY_CODEX_ENV")"
+    case "$legacy_codex_source" in
+        auto|wham) ;;
+        *) legacy_codex_source=local ;;
+    esac
 
     if [[ ! -e "$CONFIG_FILE" ]]; then
         {
             echo "# Select the indicators managed at GNOME login."
             echo "CODEX=true"
+            echo "CODEX_RATE_SOURCE=$legacy_codex_source"
             echo "CLAUDE=true"
             echo "GROK=true"
             echo "GEMINI=true"
@@ -149,31 +191,38 @@ install_manager() {
             echo "PROVIDER_ORDER=codex,claude,grok,gemini"
         } > "$CONFIG_FILE"
     fi
-    if ! grep -q '^DISPLAY_MODE=' "$CONFIG_FILE"; then
-        legacy_display="$(
-            sed -n -E 's/^DISPLAY_PROVIDER=(codex|claude|grok|gemini)$/\1/p' \
-                "$CONFIG_FILE" | tail -n 1
-        )"
+    if ! has_config_assignment CODEX_RATE_SOURCE; then
+        printf '\n# local (default), auto, or wham; auto/wham opt in to network polling.\n' >> "$CONFIG_FILE"
+        printf 'CODEX_RATE_SOURCE=%s\n' "$legacy_codex_source" >> "$CONFIG_FILE"
+    fi
+    if ! has_config_assignment DISPLAY_MODE; then
+        legacy_display="$(read_config_value DISPLAY_PROVIDER)"
+        case "$legacy_display" in
+            codex|claude|grok|gemini) ;;
+            *) legacy_display="" ;;
+        esac
         if [[ -n "$legacy_display" ]]; then
             printf 'DISPLAY_MODE=custom\n' >> "$CONFIG_FILE"
         else
             printf 'DISPLAY_MODE=auto\n' >> "$CONFIG_FILE"
         fi
     fi
-    if ! grep -q '^DISPLAY_PROVIDERS=' "$CONFIG_FILE"; then
+    if ! has_config_assignment DISPLAY_PROVIDERS; then
         if [[ -n "${legacy_display:-}" ]]; then
             printf 'DISPLAY_PROVIDERS=%s\n' "$legacy_display" >> "$CONFIG_FILE"
         else
             printf 'DISPLAY_PROVIDERS=codex,claude,grok,gemini\n' >> "$CONFIG_FILE"
         fi
     fi
-    if ! grep -q '^DROPDOWN_PROVIDERS=' "$CONFIG_FILE"; then
+    if ! has_config_assignment DROPDOWN_PROVIDERS; then
         printf 'DROPDOWN_PROVIDERS=codex,claude,grok,gemini\n' >> "$CONFIG_FILE"
     fi
-    if ! grep -q '^PROVIDER_ORDER=' "$CONFIG_FILE"; then
+    if ! has_config_assignment PROVIDER_ORDER; then
         printf 'PROVIDER_ORDER=codex,claude,grok,gemini\n' >> "$CONFIG_FILE"
     fi
-    sed -i '/^DISPLAY_PROVIDER=/d' "$CONFIG_FILE"
+    sed -E -i.bak '/^[[:space:]]*(export[[:space:]]+)?DISPLAY_PROVIDER[[:space:]]*=/d' \
+        "$CONFIG_FILE"
+    rm -f -- "$CONFIG_FILE.bak"
     chmod 600 "$CONFIG_FILE"
 
     if [[ "$SOURCE_SCRIPT" != "$INSTALLED_SCRIPT" ]]; then
