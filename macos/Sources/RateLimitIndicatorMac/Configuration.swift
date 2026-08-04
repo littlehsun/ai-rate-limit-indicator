@@ -50,7 +50,7 @@ enum ConfigurationStore {
             let content = line.split(separator: "#", maxSplits: 1).first.map(String.init) ?? ""
             let parts = content.split(separator: "=", maxSplits: 1).map(String.init)
             guard parts.count == 2 else { continue }
-            values[parts[0].trimmingCharacters(in: .whitespaces).uppercased()] =
+            values[normalizedKey(parts[0])] =
                 parts[1].trimmingCharacters(in: .whitespaces)
         }
 
@@ -98,8 +98,8 @@ enum ConfigurationStore {
         var written = Set<String>()
         for line in existing.components(separatedBy: .newlines) where !line.isEmpty {
             let content = line.split(separator: "#", maxSplits: 1).first.map(String.init) ?? ""
-            let key = content.split(separator: "=", maxSplits: 1).first.map(String.init)?
-                .trimmingCharacters(in: .whitespaces).uppercased() ?? ""
+            let key = content.split(separator: "=", maxSplits: 1).first
+                .map { normalizedKey(String($0)) } ?? ""
             guard let replacement = updates[key] else {
                 output.append(line)
                 continue
@@ -137,6 +137,14 @@ enum ConfigurationStore {
     static func existingContents(at url: URL) throws -> String {
         guard FileManager.default.fileExists(atPath: url.path) else { return "" }
         return try String(contentsOf: url, encoding: .utf8)
+    }
+
+    private static func normalizedKey(_ rawKey: String) -> String {
+        let components = rawKey.split(whereSeparator: { $0.isWhitespace })
+        if components.count == 2 && components[0].lowercased() == "export" {
+            return components[1].uppercased()
+        }
+        return rawKey.trimmingCharacters(in: .whitespaces).uppercased()
     }
 
     private static func providers(from value: String?) -> [String]? {

@@ -154,6 +154,42 @@ final class BackendContractTests: XCTestCase {
         XCTAssertEqual(configuration.indicatorProviders, ["grok"])
     }
 
+    func testConfigurationLoadsAndReplacesExportedDisplaySettings() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let url = directory.appendingPathComponent("providers.env")
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try """
+        export CODEX=true
+        export CLAUDE=false
+        export GROK=false
+        export GEMINI=false
+        export DISPLAY_MODE=custom
+        export DISPLAY_PROVIDERS=codex
+        export DROPDOWN_PROVIDERS=codex
+        export PROVIDER_ORDER=codex,claude,grok,gemini
+        """.write(to: url, atomically: true, encoding: .utf8)
+
+        var configuration = ConfigurationStore.load(from: url)
+        XCTAssertEqual(configuration.mode, .custom)
+        XCTAssertEqual(configuration.indicatorProviders, ["codex"])
+        configuration.mode = .auto
+        try ConfigurationStore.save(configuration, to: url)
+
+        let saved = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertFalse(saved.contains("export DISPLAY_MODE="))
+        XCTAssertEqual(
+            saved.components(separatedBy: .newlines)
+                .filter { $0.hasPrefix("DISPLAY_MODE=") }.count,
+            1
+        )
+        XCTAssertTrue(saved.contains("DISPLAY_MODE=auto"))
+    }
+
     func testMissingConfigurationHasNoEnabledProviders() {
         let missing = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
