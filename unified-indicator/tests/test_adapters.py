@@ -89,9 +89,9 @@ class AdapterTests(unittest.TestCase):
             config = Path(tmp) / "providers.env"
             config.write_text(
                 "CODEX=true\nCLAUDE=true\nGROK=true\nGEMINI=true\n"
-                "DISPLAY_MODE=auto\nDISPLAY_PROVIDERS=codex,grok\n"
-                "DROPDOWN_PROVIDERS=codex,claude,grok\n"
-                "PROVIDER_ORDER=codex,grok,claude,gemini\n",
+                "export DISPLAY_MODE=auto\nexport DISPLAY_PROVIDERS=codex,grok\n"
+                "export DROPDOWN_PROVIDERS=codex,claude,grok\n"
+                "export PROVIDER_ORDER=codex,grok,claude,gemini\n",
                 encoding="utf-8",
             )
 
@@ -114,6 +114,11 @@ class AdapterTests(unittest.TestCase):
                 provider_display_order(read_manager_config(config)),
                 ("grok", "claude", "codex", "gemini"),
             )
+            saved = config.read_text(encoding="utf-8")
+            self.assertNotIn("export DISPLAY_", saved)
+            self.assertNotIn("export DROPDOWN_PROVIDERS=", saved)
+            self.assertNotIn("export PROVIDER_ORDER=", saved)
+            self.assertEqual(saved.count("DISPLAY_MODE="), 1)
             self.assertEqual(config.stat().st_mode & 0o777, 0o600)
 
     def test_codex_adapter_keeps_reset_credit_expiration(self):
