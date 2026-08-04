@@ -339,6 +339,28 @@ echo "Preparing legacy Codex menu-bar migration..."
 if [[ "$legacy_login_was_enabled" == true ]]; then
     touch "$LEGACY_LOGIN_MIGRATION_MARKER"
     chmod 600 "$LEGACY_LOGIN_MIGRATION_MARKER"
+    launchctl bootout "gui/$UID/com.hsun.codex-rate-menubar" 2>/dev/null || true
+    launchctl bootout "gui/$UID" "$LEGACY_CODEX_PLIST" 2>/dev/null || true
+    cat > "$LEGACY_CODEX_PLIST" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.hsun.codex-rate-menubar</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/open</string>
+    <string>app-placeholder</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+</dict>
+</plist>
+PLIST
+    /usr/bin/plutil -replace ProgramArguments.1 -string "$APP_DIR" \
+        "$LEGACY_CODEX_PLIST"
 else
     launchctl bootout "gui/$UID/com.hsun.codex-rate-menubar" 2>/dev/null || true
     launchctl bootout "gui/$UID" "$LEGACY_CODEX_PLIST" 2>/dev/null || true
