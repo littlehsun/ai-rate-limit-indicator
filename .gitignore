@@ -6,6 +6,9 @@ __pycache__/
 .DS_Store
 *.svg.tmp
 
+# Swift build artifacts from `swift test --package-path macos`
+macos/.build/
+
 # Local credentials and runtime configuration
 .env
 .env.*

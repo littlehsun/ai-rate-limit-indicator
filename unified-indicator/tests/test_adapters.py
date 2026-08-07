@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from adapters import (
+    _no_data,
     display_settings,
     dropdown_providers,
     enabled_providers,
@@ -65,6 +66,13 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(snapshot.provider, "claude")
         self.assertEqual(snapshot.windows, ())
         self.assertEqual(snapshot.status, "no_data")
+        self.assertEqual(snapshot.error, "no credentials")
+
+    def test_no_data_without_a_reason_leaves_the_error_unset(self):
+        snapshot = _no_data("codex")
+
+        self.assertEqual(snapshot.status, "no_data")
+        self.assertIsNone(snapshot.error)
 
     def test_claude_adapter_prefers_oauth_usage(self):
         oauth_snapshot = ClaudeOAuthSnapshot(
