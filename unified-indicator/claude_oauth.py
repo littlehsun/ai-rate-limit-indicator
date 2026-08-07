@@ -2,18 +2,22 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Iterator, Mapping, Optional
 
 
 USAGE_ENDPOINT = "https://api.anthropic.com/api/oauth/usage"
 BETA_HEADER = "oauth-2025-04-20"
 USER_AGENT = "claude-code/2.1.0"
+KEYCHAIN_SERVICE = "Claude Code-credentials"
+KEYCHAIN_TIMEOUT = 10.0
 
 
 class ClaudeOAuthUnavailable(RuntimeError):
@@ -54,15 +58,62 @@ def default_credentials_path() -> Path:
     return root / ".credentials.json"
 
 
+def read_keychain_credentials() -> Optional[str]:
+    """Return the raw Claude Code credential JSON held in the login Keychain."""
+
+    if sys.platform != "darwin":
+        return None
+    try:
+        result = subprocess.run(
+            ("security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"),
+            capture_output=True,
+            text=True,
+            timeout=KEYCHAIN_TIMEOUT,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
 def read_credentials(
     path: Optional[Path] = None,
     *,
     now_ms: Optional[int] = None,
+    keychain_reader: Optional[Callable[[], Optional[str]]] = None,
 ) -> ClaudeOAuthCredentials:
+    now_ms = int(time.time() * 1000) if now_ms is None else now_ms
     credentials_path = path or default_credentials_path()
+    read_keychain = keychain_reader or read_keychain_credentials
+
+    def sources() -> Iterator[str]:
+        try:
+            yield credentials_path.read_text(encoding="utf-8")
+        except OSError:
+            pass
+        # Claude Code on macOS keeps credentials in the Keychain rather than on
+        # disk. An explicit path or file override asks for that file only.
+        if path is None and not os.environ.get("CLAUDE_OAUTH_CREDENTIALS_FILE"):
+            raw = read_keychain()
+            if raw is not None:
+                yield raw
+
+    first_error: Optional[ClaudeOAuthUnavailable] = None
+    for raw in sources():
+        try:
+            return _parse_credentials(raw, now_ms)
+        except ClaudeOAuthUnavailable as exc:
+            first_error = first_error or exc
+    if first_error is not None:
+        raise first_error
+    raise ClaudeOAuthUnavailable("Claude OAuth credentials are unavailable")
+
+
+def _parse_credentials(raw: str, now_ms: int) -> ClaudeOAuthCredentials:
     try:
-        payload = json.loads(credentials_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
         raise ClaudeOAuthUnavailable(
             "Claude OAuth credentials are unavailable"
         ) from exc
@@ -78,7 +129,6 @@ def read_credentials(
     if not access_token or expires_at_ms is None:
         raise ClaudeOAuthUnavailable("Claude OAuth credentials are incomplete")
 
-    now_ms = int(time.time() * 1000) if now_ms is None else now_ms
     if expires_at_ms <= now_ms + 60_000:
         raise ClaudeOAuthUnavailable("Claude OAuth access token is expired")
 
