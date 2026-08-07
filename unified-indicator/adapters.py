@@ -288,8 +288,8 @@ def load_claude() -> ProviderSnapshot:
 
     try:
         oauth_snapshot = fetch_oauth_snapshot()
-    except ClaudeOAuthUnavailable:
-        return _no_data("claude")
+    except ClaudeOAuthUnavailable as exc:
+        return _no_data("claude", str(exc))
 
     windows = tuple(
         UsageWindow(
@@ -392,13 +392,14 @@ def load_gemini() -> ProviderSnapshot:
     )
 
 
-def _no_data(provider: str) -> ProviderSnapshot:
+def _no_data(provider: str, reason: Optional[str] = None) -> ProviderSnapshot:
     return ProviderSnapshot(
         provider=provider,
         label=PROVIDER_LABELS[provider],
         updated_at=None,
         windows=(),
         status="no_data",
+        error=reason,
     )
 
 
