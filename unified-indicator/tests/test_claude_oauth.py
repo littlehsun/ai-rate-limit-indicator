@@ -1,8 +1,10 @@
 import json
+import os
 import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest import mock
 
 from claude_oauth import (
     BETA_HEADER,
@@ -10,6 +12,18 @@ from claude_oauth import (
     fetch_oauth_snapshot,
     read_credentials,
 )
+
+
+def _credential_json(access_token, expires_at=4_102_444_800_000, scopes=None):
+    return json.dumps(
+        {
+            "claudeAiOauth": {
+                "accessToken": access_token,
+                "expiresAt": expires_at,
+                "scopes": scopes or ["user:profile"],
+            }
+        }
+    )
 
 
 class ClaudeOAuthTests(unittest.TestCase):
@@ -100,6 +114,80 @@ class ClaudeOAuthTests(unittest.TestCase):
             [window.used_percent for window in snapshot.windows],
             [13, 45],
         )
+
+
+class ClaudeOAuthKeychainTests(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch.dict(
+            os.environ,
+            {"CLAUDE_CONFIG_DIR": "", "CLAUDE_OAUTH_CREDENTIALS_FILE": ""},
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_falls_back_to_keychain_when_file_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["CLAUDE_CONFIG_DIR"] = tmp
+            parsed = read_credentials(
+                now_ms=1_000_000,
+                keychain_reader=lambda: _credential_json("keychain-token"),
+            )
+
+        self.assertEqual(parsed.access_token, "keychain-token")
+
+    def test_prefers_the_credentials_file_over_the_keychain(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["CLAUDE_CONFIG_DIR"] = tmp
+            Path(tmp, ".credentials.json").write_text(
+                _credential_json("file-token"), encoding="utf-8"
+            )
+            parsed = read_credentials(
+                now_ms=1_000_000,
+                keychain_reader=self.fail,
+            )
+
+        self.assertEqual(parsed.access_token, "file-token")
+
+    def test_falls_back_to_keychain_when_the_file_token_is_expired(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["CLAUDE_CONFIG_DIR"] = tmp
+            Path(tmp, ".credentials.json").write_text(
+                _credential_json("stale-token", expires_at=1_000_000),
+                encoding="utf-8",
+            )
+            parsed = read_credentials(
+                now_ms=1_000_000,
+                keychain_reader=lambda: _credential_json("keychain-token"),
+            )
+
+        self.assertEqual(parsed.access_token, "keychain-token")
+
+    def test_reports_the_file_error_when_the_keychain_is_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["CLAUDE_CONFIG_DIR"] = tmp
+            Path(tmp, ".credentials.json").write_text(
+                _credential_json("stale-token", expires_at=1_000_000),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ClaudeOAuthUnavailable, "expired"):
+                read_credentials(now_ms=1_000_000, keychain_reader=lambda: None)
+
+    def test_file_override_does_not_consult_the_keychain(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["CLAUDE_OAUTH_CREDENTIALS_FILE"] = str(
+                Path(tmp, "absent.json")
+            )
+            with self.assertRaises(ClaudeOAuthUnavailable):
+                read_credentials(now_ms=1_000_000, keychain_reader=self.fail)
+
+    def test_explicit_path_does_not_consult_the_keychain(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(ClaudeOAuthUnavailable):
+                read_credentials(
+                    Path(tmp, "absent.json"),
+                    now_ms=1_000_000,
+                    keychain_reader=self.fail,
+                )
 
 
 if __name__ == "__main__":
