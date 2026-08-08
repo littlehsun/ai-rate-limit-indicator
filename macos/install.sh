@@ -53,6 +53,17 @@ normalize_config_value() {
     fi
     printf '%s' "$value"
 }
+replace_plist_argument() {
+    # Asking plutil to replace an array index inserts at that index instead of
+    # overwriting it, which leaves the placeholder in the argument list and
+    # shifts the real arguments along. Remove the slot first so the list keeps
+    # its length.
+    local plist="$1"
+    local index="$2"
+    local value="$3"
+    /usr/bin/plutil -remove "ProgramArguments.$index" "$plist"
+    /usr/bin/plutil -insert "ProgramArguments.$index" -string "$value" "$plist"
+}
 read_existing_plist_value() {
     local plist="$1"
     local key="$2"
@@ -299,7 +310,7 @@ for provider in codex grok; do
 </dict>
 </plist>
 PLIST
-    /usr/bin/plutil -replace ProgramArguments.1 -string "$APP_SUPPORT/poll-provider.sh" "$plist"
+    replace_plist_argument "$plist" 1 "$APP_SUPPORT/poll-provider.sh"
     /usr/bin/plutil -replace StandardOutPath \
         -string "$LOG_DIR/$provider-poll.out.log" "$plist"
     /usr/bin/plutil -replace StandardErrorPath \
@@ -359,8 +370,7 @@ if [[ "$legacy_login_was_enabled" == true ]]; then
 </dict>
 </plist>
 PLIST
-    /usr/bin/plutil -replace ProgramArguments.1 -string "$APP_DIR" \
-        "$LEGACY_CODEX_PLIST"
+    replace_plist_argument "$LEGACY_CODEX_PLIST" 1 "$APP_DIR"
 else
     launchctl bootout "gui/$UID/com.hsun.codex-rate-menubar" 2>/dev/null || true
     launchctl bootout "gui/$UID" "$LEGACY_CODEX_PLIST" 2>/dev/null || true
