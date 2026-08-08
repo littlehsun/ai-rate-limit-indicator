@@ -1,5 +1,7 @@
+import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -281,7 +283,7 @@ class UnifiedMacOSTests(unittest.TestCase):
         )
         self.assertIn("EnvironmentVariables.RATE_LIMIT_INDICATOR_CONFIG", mac_installer)
         self.assertIn("EnvironmentVariables.RATE_LIMIT_INDICATOR_PYTHON", mac_installer)
-        self.assertIn("plutil -replace ProgramArguments.1", mac_installer)
+        self.assertIn('replace_plist_argument "$plist" 1', mac_installer)
         self.assertIn("plutil -replace StandardOutPath", mac_installer)
         self.assertIn("plutil -replace StandardErrorPath", mac_installer)
         self.assertNotIn("<string>$APP_SUPPORT", mac_installer)
@@ -320,7 +322,7 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn('[[ -f "$LEGACY_CODEX_PLIST" ]]', mac_installer)
         self.assertIn("app-placeholder", mac_installer)
         self.assertIn(
-            'plutil -replace ProgramArguments.1 -string "$APP_DIR"',
+            'replace_plist_argument "$LEGACY_CODEX_PLIST" 1 "$APP_DIR"',
             mac_installer,
         )
         self.assertLess(
@@ -344,6 +346,64 @@ class UnifiedMacOSTests(unittest.TestCase):
             mac_installer.index('launchctl bootstrap "gui/$UID" "$plist"'),
             mac_installer.index('rm -f "$LEGACY_CODEX_PLIST"'),
         )
+
+    def test_launch_agent_arguments_replace_the_placeholder_in_place(self):
+        installer = (MACOS / "install.sh").read_text(encoding="utf-8")
+        # `plutil -replace` on an array index inserts instead of overwriting,
+        # which would leave the placeholder as the poller's provider argument.
+        self.assertNotIn("plutil -replace ProgramArguments.", installer)
+        self.assertIn("replace_plist_argument", installer)
+
+        if sys.platform != "darwin":
+            self.skipTest("plutil is only available on macOS")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            plist = Path(tmp) / "agent.plist"
+            plist.write_text(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                "<plist version=\"1.0\">\n"
+                "<dict>\n"
+                "  <key>ProgramArguments</key>\n"
+                "  <array>\n"
+                "    <string>/bin/bash</string>\n"
+                "    <string>poll-provider-placeholder</string>\n"
+                "    <string>codex</string>\n"
+                "  </array>\n"
+                "</dict>\n"
+                "</plist>\n",
+                encoding="utf-8",
+            )
+            script = subprocess.run(
+                [
+                    "sed",
+                    "-n",
+                    "/^replace_plist_argument/,/^}/p",
+                    str(MACOS / "install.sh"),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+            # A path holding XML metacharacters must survive the round trip.
+            weird_path = str(Path(tmp) / 'a & b/<x>/"q"/poll-provider.sh')
+            subprocess.run(
+                ["bash", "-c", f'{script}\nreplace_plist_argument "$1" 1 "$2"',
+                 "_", str(plist), weird_path],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            arguments = json.loads(
+                subprocess.run(
+                    ["plutil", "-extract", "ProgramArguments", "json", "-o", "-",
+                     str(plist)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout
+            )
+
+        self.assertEqual(arguments, ["/bin/bash", weird_path, "codex"])
 
     def test_refresh_failure_marks_retained_snapshots_stale(self):
         app_model = (
