@@ -56,6 +56,14 @@ chmod +x "$BIN"
 
 cat > "$POLL_BIN" <<EOF
 #!/usr/bin/env bash
+# GROK_AUTO_REFRESH lets the collector nudge the Grok CLI when the token has
+# expired. It lives in the shared config so both platforms read one switch.
+SHARED_CONFIG="\${RATE_LIMIT_INDICATOR_CONFIG:-\$HOME/.config/rate-limit-indicator/providers.env}"
+if [[ -z "\${GROK_AUTO_REFRESH:-}" && -f "\$SHARED_CONFIG" ]]; then
+    case "\$(sed -n -E 's/^[[:space:]]*(export[[:space:]]+)?GROK_AUTO_REFRESH[[:space:]]*=[[:space:]]*([^#[:space:]]+).*\$/\\2/p' "\$SHARED_CONFIG" | tail -n 1 | tr -d '"'\\''' | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes|on) export GROK_AUTO_REFRESH=1 ;;
+    esac
+fi
 exec python3 "$APP_DIR/grok_rate.py" --once "\$@"
 EOF
 chmod +x "$POLL_BIN"

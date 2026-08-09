@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -21,6 +23,7 @@ from grok_rate import (
     poll_and_cache,
     describe_missing_token,
     read_access_token,
+    refresh_token_with_cli,
     read_cache,
     write_cache,
 )
@@ -193,6 +196,86 @@ class GrokRateTests(unittest.TestCase):
             message = describe_missing_token(home)
             self.assertIn("no access token found", message)
             self.assertNotIn("expired", message)
+
+    def test_cli_refresh_is_opt_in(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / "auth.json").write_text(
+                json.dumps(
+                    {"e": {"key": "old", "expires_at": "2020-01-01T00:00:00+00:00"}}
+                ),
+                encoding="utf-8",
+            )
+            calls = []
+            with mock.patch.dict(os.environ, {"GROK_AUTO_REFRESH": ""}):
+                self.assertIsNone(
+                    refresh_token_with_cli(home, runner=calls.append)
+                )
+
+        self.assertEqual(calls, [])
+
+    def test_cli_refresh_rereads_the_token_the_cli_wrote(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            auth = home / "auth.json"
+            auth.write_text(
+                json.dumps(
+                    {"e": {"key": "old", "expires_at": "2020-01-01T00:00:00+00:00"}}
+                ),
+                encoding="utf-8",
+            )
+
+            def fake_cli(_grok_bin):
+                auth.write_text(
+                    json.dumps(
+                        {
+                            "e": {
+                                "key": "refreshed",
+                                "expires_at": "2099-01-01T00:00:00+00:00",
+                            }
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+            with mock.patch.dict(os.environ, {"GROK_AUTO_REFRESH": "1"}), mock.patch(
+                "grok_rate.shutil.which", return_value="/usr/bin/grok"
+            ):
+                self.assertEqual(
+                    refresh_token_with_cli(home, runner=fake_cli), "refreshed"
+                )
+
+    def test_cli_refresh_survives_a_failing_cli(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / "auth.json").write_text(
+                json.dumps(
+                    {"e": {"key": "old", "expires_at": "2020-01-01T00:00:00+00:00"}}
+                ),
+                encoding="utf-8",
+            )
+
+            def boom(_grok_bin):
+                raise subprocess.TimeoutExpired("grok", 60)
+
+            with mock.patch.dict(os.environ, {"GROK_AUTO_REFRESH": "1"}), mock.patch(
+                "grok_rate.shutil.which", return_value="/usr/bin/grok"
+            ):
+                self.assertIsNone(refresh_token_with_cli(home, runner=boom))
+
+    def test_cli_refresh_needs_the_cli_on_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / "auth.json").write_text("{}", encoding="utf-8")
+            calls = []
+            with mock.patch.dict(os.environ, {"GROK_AUTO_REFRESH": "1"}), mock.patch(
+                "grok_rate.shutil.which", return_value=None
+            ):
+                self.assertIsNone(
+                    refresh_token_with_cli(home, runner=calls.append)
+                )
+
+        self.assertEqual(calls, [])
 
     def test_token_without_an_expiry_is_still_usable(self):
         with tempfile.TemporaryDirectory() as tmp:

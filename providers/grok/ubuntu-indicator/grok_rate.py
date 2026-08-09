@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
+import subprocess
 import sys
 import time
 import urllib.error
@@ -17,6 +19,7 @@ from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
 
 DEFAULT_BILLING_URL = "https://cli-chat-proxy.grok.com/v1/billing"
 DEFAULT_USER_AGENT = "grok-rate-indicator/0.1"
+CLI_REFRESH_TIMEOUT = 60.0
 
 
 @dataclass(frozen=True)
@@ -130,6 +133,48 @@ def read_access_token(grok_home: Optional[Path] = None) -> Optional[str]:
     """Return the best unexpired bearer token from ~/.grok/auth.json."""
     candidates, _ = _read_auth_candidates(grok_home)
     return candidates[0][1] if candidates else None
+
+
+def refresh_token_with_cli(
+    grok_home: Optional[Path] = None,
+    *,
+    runner: Optional[Any] = None,
+) -> Optional[str]:
+    """Ask the Grok CLI to refresh its own token, and return the fresh one.
+
+    auth.json belongs to the CLI, which serialises refreshes behind a file lock
+    and rotates the refresh token as it goes. Running one cheap authenticated
+    command is the supported way to get a live token without reimplementing any
+    of that. `grok models` is used because it authenticates, exits in about a
+    second, and spends no model quota.
+    """
+    if not _flag_enabled(os.environ.get("GROK_AUTO_REFRESH")):
+        return None
+    grok_bin = shutil.which("grok")
+    if grok_bin is None:
+        return None
+    run = runner or _run_grok_models
+    try:
+        run(grok_bin)
+    except Exception:
+        # A refresh that did not happen is reported by the caller as an expired
+        # token, which is already the state we were trying to leave.
+        return None
+    return read_access_token(grok_home)
+
+
+def _run_grok_models(grok_bin: str) -> None:
+    subprocess.run(
+        (grok_bin, "models"),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=CLI_REFRESH_TIMEOUT,
+        check=False,
+    )
+
+
+def _flag_enabled(value: Optional[str]) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def describe_missing_token(grok_home: Optional[Path] = None) -> str:
@@ -512,6 +557,8 @@ def poll_and_cache(
     url: Optional[str] = None,
 ) -> GrokBillingSnapshot:
     token = read_access_token(grok_home)
+    if not token:
+        token = refresh_token_with_cli(grok_home)
     if not token:
         raise RuntimeError(describe_missing_token(grok_home))
     snapshot = fetch_billing_snapshot(token=token, url=url)

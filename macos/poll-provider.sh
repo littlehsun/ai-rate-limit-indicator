@@ -225,6 +225,9 @@ case "$provider" in
         ;;
     grok)
         is_enabled GROK || exit 0
+        if is_enabled GROK_AUTO_REFRESH; then
+            export GROK_AUTO_REFRESH=1
+        fi
         exec "$PYTHON_BIN" "$APP_SUPPORT/backend/collectors/grok_rate.py" --once
         ;;
     *)
