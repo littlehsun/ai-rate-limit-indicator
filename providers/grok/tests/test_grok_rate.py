@@ -19,6 +19,7 @@ from grok_rate import (
     parse_credits_payload,
     parse_monthly_payload,
     poll_and_cache,
+    describe_missing_token,
     read_access_token,
     read_cache,
     write_cache,
@@ -167,6 +168,45 @@ class GrokRateTests(unittest.TestCase):
             }
             (home / "auth.json").write_text(json.dumps(auth), encoding="utf-8")
             self.assertEqual(read_access_token(home), "new-token")
+
+    def test_read_access_token_never_returns_an_expired_token(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            auth = {
+                "expired": {
+                    "key": "old-token",
+                    "expires_at": "2020-01-01T00:00:00+00:00",
+                }
+            }
+            (home / "auth.json").write_text(json.dumps(auth), encoding="utf-8")
+
+            # Sending it would only earn a 401 on every poll.
+            self.assertIsNone(read_access_token(home))
+            self.assertIn("expired", describe_missing_token(home))
+
+    def test_missing_token_is_reported_apart_from_an_expired_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / "auth.json").write_text("{}", encoding="utf-8")
+
+            self.assertIsNone(read_access_token(home))
+            message = describe_missing_token(home)
+            self.assertIn("no access token found", message)
+            self.assertNotIn("expired", message)
+
+    def test_token_without_an_expiry_is_still_usable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            auth = {"legacy": {"key": "no-expiry-token"}}
+            (home / "auth.json").write_text(json.dumps(auth), encoding="utf-8")
+            self.assertEqual(read_access_token(home), "no-expiry-token")
+
+    def test_unparsable_expiry_does_not_discard_the_token(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            auth = {"odd": {"key": "kept-token", "expires_at": "not-a-date"}}
+            (home / "auth.json").write_text(json.dumps(auth), encoding="utf-8")
+            self.assertEqual(read_access_token(home), "kept-token")
 
     def test_cache_roundtrip(self):
         snap = merge_snapshots(
