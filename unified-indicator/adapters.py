@@ -310,11 +310,19 @@ def load_claude() -> ProviderSnapshot:
 
 
 def load_grok() -> ProviderSnapshot:
-    from grok_rate import default_cache_path, format_usd_cents, read_cache
+    from grok_rate import (
+        default_cache_path,
+        format_usd_cents,
+        read_access_token,
+        read_cache,
+    )
 
     snapshot = read_cache(Path(os.environ.get("GROK_RATE_CACHE", default_cache_path())))
+    # The cache only refreshes while the CLI keeps a live token, so an expired
+    # one is why the panel is stuck rather than an unrelated poll failure.
+    error = None if read_access_token() else "Grok sign-in expired; run the grok CLI"
     if snapshot is None:
-        return _no_data("grok")
+        return _no_data("grok", error)
     windows = []
     if snapshot.weekly:
         windows.append(
@@ -354,6 +362,7 @@ def load_grok() -> ProviderSnapshot:
         snapshot.updated_at,
         tuple(windows),
         status=_freshness(snapshot.updated_at),
+        error=error,
         extras=extras,
     )
 

@@ -203,10 +203,42 @@ class AdapterTests(unittest.TestCase):
             updated_at = "2026-07-30T06:00:00Z"
             product_usage = ()
 
-        with patch("grok_rate.read_cache", return_value=Snapshot()):
+        with patch("grok_rate.read_cache", return_value=Snapshot()), patch(
+            "grok_rate.read_access_token", return_value="live-token"
+        ):
             snapshot = load_grok()
 
         self.assertEqual(snapshot.windows[0].label, "7D")
+        self.assertIsNone(snapshot.error)
+
+    def test_grok_adapter_explains_an_expired_sign_in_over_stale_data(self):
+        class Window:
+            used_percent = 23
+            period_end = "2026-08-01T00:00:00Z"
+
+        class Snapshot:
+            weekly = Window()
+            monthly = None
+            updated_at = "2026-07-30T06:00:00Z"
+            product_usage = ()
+
+        with patch("grok_rate.read_cache", return_value=Snapshot()), patch(
+            "grok_rate.read_access_token", return_value=None
+        ):
+            snapshot = load_grok()
+
+        # The cached numbers stay visible, with the reason they stopped moving.
+        self.assertEqual(snapshot.windows[0].used_percent, 23)
+        self.assertIn("expired", snapshot.error)
+
+    def test_grok_adapter_explains_an_expired_sign_in_without_a_cache(self):
+        with patch("grok_rate.read_cache", return_value=None), patch(
+            "grok_rate.read_access_token", return_value=None
+        ):
+            snapshot = load_grok()
+
+        self.assertEqual(snapshot.status, "no_data")
+        self.assertIn("expired", snapshot.error)
 
     def test_gemini_adapter_prefers_live_agy_quota(self):
         agy_snapshot = AgyQuotaSnapshot(

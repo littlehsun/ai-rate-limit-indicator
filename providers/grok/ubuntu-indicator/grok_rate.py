@@ -81,19 +81,22 @@ def credits_billing_url(base_url: Optional[str] = None) -> str:
     return _with_query(base_url or default_billing_url(), {"format": "credits"})
 
 
-def read_access_token(grok_home: Optional[Path] = None) -> Optional[str]:
-    """Return the best available bearer token from ~/.grok/auth.json."""
+def _read_auth_candidates(
+    grok_home: Optional[Path] = None,
+) -> tuple[list[tuple[float, str]], int]:
+    """Return live (score, token) pairs from auth.json and the expired count."""
     home = grok_home or default_grok_home()
     auth_path = home / "auth.json"
     try:
         raw = json.loads(auth_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return None
+        return [], 0
 
     if not isinstance(raw, dict):
-        return None
+        return [], 0
 
     candidates: list[tuple[float, str]] = []
+    expired = 0
     now = datetime.now(timezone.utc)
     for value in raw.values():
         if not isinstance(value, dict):
@@ -108,15 +111,34 @@ def read_access_token(grok_home: Optional[Path] = None) -> Optional[str]:
                 exp = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
                 if exp.tzinfo is None:
                     exp = exp.replace(tzinfo=timezone.utc)
-                score = exp.timestamp() if exp > now else exp.timestamp() - 1e12
             except ValueError:
                 pass
+            else:
+                # An expired token only earns a 401 on every poll. The Grok CLI
+                # owns refreshing it, so skip it and let the caller say so.
+                if exp <= now:
+                    expired += 1
+                    continue
+                score = exp.timestamp()
         candidates.append((score, token.strip()))
 
-    if not candidates:
-        return None
     candidates.sort(key=lambda item: item[0], reverse=True)
-    return candidates[0][1]
+    return candidates, expired
+
+
+def read_access_token(grok_home: Optional[Path] = None) -> Optional[str]:
+    """Return the best unexpired bearer token from ~/.grok/auth.json."""
+    candidates, _ = _read_auth_candidates(grok_home)
+    return candidates[0][1] if candidates else None
+
+
+def describe_missing_token(grok_home: Optional[Path] = None) -> str:
+    """Explain why read_access_token found nothing usable."""
+    auth_path = (grok_home or default_grok_home()) / "auth.json"
+    _, expired = _read_auth_candidates(grok_home)
+    if expired:
+        return f"Grok access token expired; sign in again with the grok CLI ({auth_path})"
+    return f"no access token found in {auth_path}"
 
 
 def _money_val(value: Any) -> Optional[int]:
@@ -491,7 +513,7 @@ def poll_and_cache(
 ) -> GrokBillingSnapshot:
     token = read_access_token(grok_home)
     if not token:
-        raise RuntimeError(f"no access token found in {(grok_home or default_grok_home()) / 'auth.json'}")
+        raise RuntimeError(describe_missing_token(grok_home))
     snapshot = fetch_billing_snapshot(token=token, url=url)
     write_cache(snapshot, cache_path=cache_path)
     return snapshot
