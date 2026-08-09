@@ -22,6 +22,7 @@ from grok_rate import (
     parse_monthly_payload,
     poll_and_cache,
     describe_missing_token,
+    find_grok_cli,
     read_access_token,
     refresh_token_with_cli,
     read_cache,
@@ -263,14 +264,51 @@ class GrokRateTests(unittest.TestCase):
             ):
                 self.assertIsNone(refresh_token_with_cli(home, runner=boom))
 
-    def test_cli_refresh_needs_the_cli_on_path(self):
+    def test_cli_is_found_through_the_installer_override(self):
+        # A launchd/systemd poller gets a bare PATH, so `which` finds nothing
+        # and only the recorded absolute path works.
+        with tempfile.TemporaryDirectory() as tmp:
+            grok_bin = Path(tmp) / "grok"
+            grok_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+            grok_bin.chmod(0o700)
+            with mock.patch.dict(os.environ, {"GROK_CLI": str(grok_bin)}), mock.patch(
+                "grok_rate.shutil.which", return_value=None
+            ):
+                self.assertEqual(find_grok_cli(), str(grok_bin))
+
+    def test_a_non_executable_override_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "absent"
+            with mock.patch.dict(os.environ, {"GROK_CLI": str(missing)}), mock.patch(
+                "grok_rate.shutil.which", return_value=None
+            ):
+                self.assertIsNone(find_grok_cli())
+
+    def test_well_known_location_is_used_when_path_misses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            grok_bin = home / ".local" / "bin" / "grok"
+            grok_bin.parent.mkdir(parents=True)
+            grok_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+            grok_bin.chmod(0o700)
+            with mock.patch.dict(os.environ, {"GROK_CLI": ""}), mock.patch(
+                "grok_rate.shutil.which", return_value=None
+            ), mock.patch("grok_rate.Path.home", return_value=home):
+                self.assertEqual(find_grok_cli(), str(grok_bin))
+
+    def test_cli_refresh_does_nothing_when_no_cli_can_be_found(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
             (home / "auth.json").write_text("{}", encoding="utf-8")
             calls = []
-            with mock.patch.dict(os.environ, {"GROK_AUTO_REFRESH": "1"}), mock.patch(
+            # home is patched too, so the well-known locations stay empty and
+            # the developer's own install cannot satisfy the lookup.
+            with mock.patch.dict(os.environ, {
+                "GROK_AUTO_REFRESH": "1",
+                "GROK_CLI": "",
+            }), mock.patch(
                 "grok_rate.shutil.which", return_value=None
-            ):
+            ), mock.patch("grok_rate.Path.home", return_value=home):
                 self.assertIsNone(
                     refresh_token_with_cli(home, runner=calls.append)
                 )
