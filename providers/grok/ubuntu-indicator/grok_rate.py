@@ -150,7 +150,7 @@ def refresh_token_with_cli(
     """
     if not _flag_enabled(os.environ.get("GROK_AUTO_REFRESH")):
         return None
-    grok_bin = shutil.which("grok")
+    grok_bin = find_grok_cli()
     if grok_bin is None:
         return None
     run = runner or _run_grok_models
@@ -161,6 +161,29 @@ def refresh_token_with_cli(
         # token, which is already the state we were trying to leave.
         return None
     return read_access_token(grok_home)
+
+
+def find_grok_cli() -> Optional[str]:
+    """Locate the Grok CLI, tolerating a launcher with a bare PATH.
+
+    Pollers run under launchd or systemd, whose PATH holds none of the
+    directories the CLI installs itself into, so PATH alone finds nothing. The
+    installer records GROK_CLI for that reason; the well-known locations are a
+    fallback for a CLI installed after the fact.
+    """
+    override = (os.environ.get("GROK_CLI") or "").strip()
+    if override:
+        return override if os.access(override, os.X_OK) else None
+    found = shutil.which("grok")
+    if found:
+        return found
+    for candidate in (
+        Path.home() / ".local" / "bin" / "grok",
+        Path.home() / ".grok" / "bin" / "grok",
+    ):
+        if os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
 
 
 def _run_grok_models(grok_bin: str) -> None:

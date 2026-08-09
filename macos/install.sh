@@ -17,6 +17,9 @@ CLAUDE_OAUTH_CREDENTIALS_FILE_OVERRIDE="${CLAUDE_OAUTH_CREDENTIALS_FILE:-}"
 GROK_HOME_OVERRIDE="${GROK_HOME:-}"
 GROK_RATE_CACHE_OVERRIDE="${GROK_RATE_CACHE:-}"
 GROK_RATE_BILLING_URL_OVERRIDE="${GROK_RATE_BILLING_URL:-}"
+# launchd hands the poller a bare PATH, so resolve the CLI here the way
+# PYTHON_BIN is resolved and pass the absolute path through the plist.
+GROK_CLI_OVERRIDE="${GROK_CLI:-$(command -v grok || true)}"
 AGY_RATE_CACHE_OVERRIDE="${AGY_RATE_CACHE:-}"
 LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
 LOG_DIR="$HOME/Library/Logs/RateLimitIndicator"
@@ -345,6 +348,10 @@ PLIST
         if [[ -n "$GROK_RATE_BILLING_URL_OVERRIDE" ]]; then
             /usr/bin/plutil -insert EnvironmentVariables.GROK_RATE_BILLING_URL \
                 -string "$GROK_RATE_BILLING_URL_OVERRIDE" "$plist"
+        fi
+        if [[ -n "$GROK_CLI_OVERRIDE" ]]; then
+            /usr/bin/plutil -insert EnvironmentVariables.GROK_CLI \
+                -string "$GROK_CLI_OVERRIDE" "$plist"
         fi
     fi
     launchctl bootout "gui/$UID" "$plist" 2>/dev/null || true

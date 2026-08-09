@@ -64,6 +64,8 @@ if [[ -z "\${GROK_AUTO_REFRESH:-}" && -f "\$SHARED_CONFIG" ]]; then
         1|true|yes|on) export GROK_AUTO_REFRESH=1 ;;
     esac
 fi
+: "\${GROK_CLI:=$(command -v grok || true)}"
+[[ -n "\$GROK_CLI" ]] && export GROK_CLI
 exec python3 "$APP_DIR/grok_rate.py" --once "\$@"
 EOF
 chmod +x "$POLL_BIN"
