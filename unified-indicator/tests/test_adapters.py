@@ -211,6 +211,46 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(snapshot.windows[0].label, "7D")
         self.assertIsNone(snapshot.error)
 
+    def test_grok_adapter_hides_legacy_monthly_and_shows_real_credit_values(self):
+        class Window:
+            used_percent = 23
+            period_end = "2026-08-01T00:00:00Z"
+
+        class Monthly:
+            used_percent = 0
+            period_end = "2026-09-01T00:00:00Z"
+            used_cents = 139
+            limit_cents = 0
+
+        class Snapshot:
+            weekly = Window()
+            monthly = Monthly()
+            updated_at = "2026-07-30T06:00:00Z"
+            product_usage = (("GrokBuild", 47),)
+            prepaid_balance_cents = -1250
+            auto_topup_enabled = True
+            auto_topup_amount_cents = -1000
+            auto_topup_monthly_cap_cents = -5000
+            on_demand_cap_cents = 5000
+            on_demand_used_cents = 725
+
+        with patch("grok_rate.read_cache", return_value=Snapshot()), patch(
+            "grok_rate.read_access_token", return_value="live-token"
+        ):
+            snapshot = load_grok()
+
+        self.assertEqual([window.label for window in snapshot.windows], ["7D"])
+        self.assertEqual(
+            snapshot.extras,
+            (
+                "GrokBuild: 47%",
+                "Credits: $12.50",
+                "Auto topup: $10",
+                "Max monthly topup: $50",
+                "Pay-as-you-go: $7.25 / $50",
+            ),
+        )
+
     def test_grok_adapter_explains_an_expired_sign_in_over_stale_data(self):
         class Window:
             used_percent = 23

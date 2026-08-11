@@ -29,7 +29,7 @@ SwiftUI app consume that same backend and display the selected providers, their
 | --- | --- | --- | --- |
 | [Codex](providers/codex/README.md) | Adapter | SwiftUI | Local Codex rollout data; optional ChatGPT quota API |
 | [Claude](providers/claude/README.md) | Adapter | SwiftUI | Claude OAuth usage API |
-| [Grok](providers/grok/README.md) | Adapter | SwiftUI | Grok CLI billing API, with 7D and monthly windows |
+| [Grok](providers/grok/README.md) | Adapter | SwiftUI | Grok CLI billing API, with the current 7D quota and product usage |
 | [Gemini](providers/gemini/README.md) | Adapter | SwiftUI | AGY localhost quota API with last-known snapshot cache |
 
 Gemini prefers the same `RetrieveUserQuotaSummary` endpoint used by AGY's

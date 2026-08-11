@@ -19,11 +19,13 @@ from grok_rate import (
     format_usd_cents,
     merge_snapshots,
     parse_credits_payload,
+    parse_auto_topup_payload,
     parse_monthly_payload,
     poll_and_cache,
     describe_missing_token,
     find_grok_cli,
     read_access_token,
+    read_user_id_for_token,
     refresh_token_with_cli,
     read_cache,
     write_cache,
@@ -83,6 +85,21 @@ class GrokRateTests(unittest.TestCase):
         self.assertEqual(weekly.period_end, "2026-07-29T00:00:00+00:00")
         self.assertTrue(meta["is_unified"])
         self.assertEqual(meta["product_usage"][0], ("GrokBuild", 4))
+
+    def test_parse_auto_topup_rule(self):
+        meta = parse_auto_topup_payload(
+            {
+                "rule": {
+                    "enabled": True,
+                    "topupAmount": {"val": -1000},
+                    "maxAmountPerMonth": {"val": -5000},
+                }
+            }
+        )
+
+        self.assertTrue(meta["auto_topup_enabled"])
+        self.assertEqual(meta["auto_topup_amount_cents"], -1000)
+        self.assertEqual(meta["auto_topup_monthly_cap_cents"], -5000)
 
     def test_zero_percent_preserved(self):
         payload = {
@@ -172,6 +189,26 @@ class GrokRateTests(unittest.TestCase):
             }
             (home / "auth.json").write_text(json.dumps(auth), encoding="utf-8")
             self.assertEqual(read_access_token(home), "new-token")
+
+    def test_reads_user_id_paired_with_selected_token(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "fresh": {
+                            "key": "new-token",
+                            "user_id": "user-123",
+                            "expires_at": "2099-01-01T00:00:00+00:00",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                read_user_id_for_token("new-token", home), "user-123"
+            )
 
     def test_read_access_token_never_returns_an_expired_token(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -337,6 +374,10 @@ class GrokRateTests(unittest.TestCase):
                 "product_usage": (("GrokBuild", 4), ("GrokChat", None)),
                 "is_unified": True,
                 "on_demand_cap_cents": 0,
+                "prepaid_balance_cents": -1250,
+                "auto_topup_enabled": True,
+                "auto_topup_amount_cents": -1000,
+                "auto_topup_monthly_cap_cents": -5000,
             },
             updated_at="2026-07-24T00:00:00+00:00",
         )
@@ -350,6 +391,10 @@ class GrokRateTests(unittest.TestCase):
             self.assertEqual(loaded.weekly.used_percent, 4)
             self.assertEqual(loaded.monthly.used_cents, 178)
             self.assertEqual(loaded.product_usage[0], ("GrokBuild", 4))
+            self.assertEqual(loaded.prepaid_balance_cents, -1250)
+            self.assertTrue(loaded.auto_topup_enabled)
+            self.assertEqual(loaded.auto_topup_amount_cents, -1000)
+            self.assertEqual(loaded.auto_topup_monthly_cap_cents, -5000)
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
     def test_legacy_cache_still_reads(self):

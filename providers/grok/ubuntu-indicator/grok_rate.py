@@ -48,6 +48,9 @@ class GrokBillingSnapshot:
     on_demand_cap_cents: Optional[int] = None
     on_demand_used_cents: Optional[int] = None
     prepaid_balance_cents: Optional[int] = None
+    auto_topup_enabled: Optional[bool] = None
+    auto_topup_amount_cents: Optional[int] = None
+    auto_topup_monthly_cap_cents: Optional[int] = None
     product_usage: tuple[tuple[str, Optional[int]], ...] = ()
     is_unified: bool = False
     subscription_tier: Optional[str] = None
@@ -82,6 +85,15 @@ def default_billing_url() -> str:
 def credits_billing_url(base_url: Optional[str] = None) -> str:
     """CLI /usage weekly view uses GET /billing?format=credits."""
     return _with_query(base_url or default_billing_url(), {"format": "credits"})
+
+
+def auto_topup_url(base_url: Optional[str] = None) -> str:
+    """Return the companion endpoint used by Grok Build's `/usage` view."""
+    parsed = urlsplit(base_url or default_billing_url())
+    path = parsed.path.rstrip("/")
+    if path.endswith("/billing"):
+        path = path[: -len("/billing")]
+    return urlunsplit(parsed._replace(path=f"{path}/auto-topup-rule", query=""))
 
 
 def _read_auth_candidates(
@@ -133,6 +145,27 @@ def read_access_token(grok_home: Optional[Path] = None) -> Optional[str]:
     """Return the best unexpired bearer token from ~/.grok/auth.json."""
     candidates, _ = _read_auth_candidates(grok_home)
     return candidates[0][1] if candidates else None
+
+
+def read_user_id_for_token(
+    token: str, grok_home: Optional[Path] = None
+) -> Optional[str]:
+    """Return the Grok user id paired with an access token, without logging it."""
+    auth_path = (grok_home or default_grok_home()) / "auth.json"
+    try:
+        raw = json.loads(auth_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    for value in raw.values():
+        if not isinstance(value, dict):
+            continue
+        candidate = value.get("key") or value.get("access_token")
+        user_id = value.get("user_id")
+        if candidate == token and isinstance(user_id, str) and user_id:
+            return user_id
+    return None
 
 
 def refresh_token_with_cli(
@@ -348,6 +381,19 @@ def parse_credits_payload(payload: dict[str, Any]) -> tuple[Optional[PeriodUsage
     )
 
 
+def parse_auto_topup_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    rule = payload.get("rule")
+    if not isinstance(rule, dict):
+        return {}
+    return {
+        "auto_topup_enabled": bool(rule.get("enabled")),
+        "auto_topup_amount_cents": _money_val(rule.get("topupAmount")),
+        "auto_topup_monthly_cap_cents": _money_val(
+            rule.get("maxAmountPerMonth")
+        ),
+    }
+
+
 def merge_snapshots(
     *,
     weekly: Optional[PeriodUsage],
@@ -369,6 +415,9 @@ def merge_snapshots(
         on_demand_cap_cents=meta.get("on_demand_cap_cents"),
         on_demand_used_cents=meta.get("on_demand_used_cents"),
         prepaid_balance_cents=meta.get("prepaid_balance_cents"),
+        auto_topup_enabled=meta.get("auto_topup_enabled"),
+        auto_topup_amount_cents=meta.get("auto_topup_amount_cents"),
+        auto_topup_monthly_cap_cents=meta.get("auto_topup_monthly_cap_cents"),
         product_usage=products,
         is_unified=bool(meta.get("is_unified")),
         subscription_tier=meta.get("subscription_tier"),
@@ -377,15 +426,23 @@ def merge_snapshots(
     )
 
 
-def _http_get_json(url: str, token: str, timeout: float = 15.0) -> dict[str, Any]:
+def _http_get_json(
+    url: str,
+    token: str,
+    timeout: float = 15.0,
+    extra_headers: Optional[dict[str, str]] = None,
+) -> dict[str, Any]:
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+        "X-XAI-Token-Auth": "xai-grok-cli",
+        "User-Agent": DEFAULT_USER_AGENT,
+    }
+    if extra_headers:
+        headers.update(extra_headers)
     req = urllib.request.Request(
         url,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json",
-            "X-XAI-Token-Auth": "xai-grok-cli",
-            "User-Agent": DEFAULT_USER_AGENT,
-        },
+        headers=headers,
         method="GET",
     )
     try:
@@ -410,6 +467,7 @@ def fetch_billing_snapshot(
     *,
     token: str,
     url: Optional[str] = None,
+    user_id: Optional[str] = None,
     timeout: float = 15.0,
 ) -> GrokBillingSnapshot:
     base = url or default_billing_url()
@@ -438,6 +496,20 @@ def fetch_billing_snapshot(
     except RuntimeError as exc:
         errors.append(f"monthly: {exc}")
 
+    # Auto top-up is optional and comes from a separate endpoint in the Grok
+    # Build `/usage` implementation. A transient failure must not hide quota.
+    if user_id:
+        try:
+            auto_topup_payload = _http_get_json(
+                auto_topup_url(base),
+                token,
+                timeout=timeout,
+                extra_headers={"x-userid": user_id},
+            )
+            meta.update(parse_auto_topup_payload(auto_topup_payload))
+        except RuntimeError:
+            pass
+
     snapshot = merge_snapshots(
         weekly=weekly,
         monthly=monthly,
@@ -461,6 +533,9 @@ def write_cache(snapshot: GrokBillingSnapshot, cache_path: Optional[Path] = None
         "on_demand_cap_cents": snapshot.on_demand_cap_cents,
         "on_demand_used_cents": snapshot.on_demand_used_cents,
         "prepaid_balance_cents": snapshot.prepaid_balance_cents,
+        "auto_topup_enabled": snapshot.auto_topup_enabled,
+        "auto_topup_amount_cents": snapshot.auto_topup_amount_cents,
+        "auto_topup_monthly_cap_cents": snapshot.auto_topup_monthly_cap_cents,
         "product_usage": [list(item) for item in snapshot.product_usage],
         "is_unified": snapshot.is_unified,
         "subscription_tier": snapshot.subscription_tier,
@@ -530,6 +605,13 @@ def read_cache(cache_path: Optional[Path] = None) -> Optional[GrokBillingSnapsho
             on_demand_cap_cents=_money_val(payload.get("on_demand_cap_cents")),
             on_demand_used_cents=_money_val(payload.get("on_demand_used_cents")),
             prepaid_balance_cents=_money_val(payload.get("prepaid_balance_cents")),
+            auto_topup_enabled=payload.get("auto_topup_enabled")
+            if isinstance(payload.get("auto_topup_enabled"), bool)
+            else None,
+            auto_topup_amount_cents=_money_val(payload.get("auto_topup_amount_cents")),
+            auto_topup_monthly_cap_cents=_money_val(
+                payload.get("auto_topup_monthly_cap_cents")
+            ),
             product_usage=tuple(products),
             is_unified=bool(payload.get("is_unified")),
             subscription_tier=payload.get("subscription_tier")
@@ -584,7 +666,11 @@ def poll_and_cache(
         token = refresh_token_with_cli(grok_home)
     if not token:
         raise RuntimeError(describe_missing_token(grok_home))
-    snapshot = fetch_billing_snapshot(token=token, url=url)
+    snapshot = fetch_billing_snapshot(
+        token=token,
+        url=url,
+        user_id=read_user_id_for_token(token, grok_home),
+    )
     write_cache(snapshot, cache_path=cache_path)
     return snapshot
 

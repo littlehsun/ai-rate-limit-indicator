@@ -28,7 +28,7 @@ reset 倒數與詳細資訊。兩個平台共用相同 backend 邏輯。
 | --- | --- |
 | Codex | 本機 Codex rollout 資料；可選用 ChatGPT quota API |
 | Claude | Claude OAuth usage API |
-| Grok | Grok CLI billing API，顯示 7D 與 Monthly |
+| Grok | Grok CLI billing API，顯示目前的 7D 額度與各產品用量 |
 | Gemini | AGY localhost quota API；暫時無法使用時保留最後一份 AGY snapshot |
 
 Gemini 會優先讀取 AGY `/usage` 同一個 `RetrieveUserQuotaSummary`

@@ -333,29 +333,43 @@ def load_grok() -> ProviderSnapshot:
                 resets_at=parse_timestamp(snapshot.weekly.period_end),
             )
         )
-    if snapshot.monthly:
-        detail = None
-        if (
-            snapshot.monthly.used_cents is not None
-            and snapshot.monthly.limit_cents is not None
-        ):
-            detail = (
-                f"{format_usd_cents(snapshot.monthly.used_cents)} / "
-                f"{format_usd_cents(snapshot.monthly.limit_cents)}"
-            )
-        windows.append(
-            UsageWindow(
-                id="monthly",
-                label="Monthly",
-                used_percent=snapshot.monthly.used_percent,
-                resets_at=parse_timestamp(snapshot.monthly.period_end),
-                detail=detail,
-            )
-        )
-    extras = tuple(
+    # monthlyLimit/used belong to Grok's deprecated billing model.  Unified
+    # accounts commonly report a non-zero used amount with a zero limit, so
+    # exposing that as a quota window produces a misleading "$x / $0 (0%)".
+    # Keep parsing it in the collector for old-cache compatibility, but only
+    # expose the current weekly quota from the normalized adapter.
+    extras = [
         f"{name}: {'--' if pct is None else f'{pct}%'}"
         for name, pct in snapshot.product_usage
-    )
+    ]
+    prepaid_balance = getattr(snapshot, "prepaid_balance_cents", None)
+    if prepaid_balance:
+        extras.append(f"Credits: {format_usd_cents(abs(prepaid_balance))}")
+        if getattr(snapshot, "auto_topup_enabled", False):
+            auto_topup_amount = getattr(snapshot, "auto_topup_amount_cents", None)
+            if auto_topup_amount:
+                extras.append(
+                    f"Auto topup: {format_usd_cents(abs(auto_topup_amount))}"
+                )
+            monthly_topup_cap = getattr(
+                snapshot, "auto_topup_monthly_cap_cents", None
+            )
+            if monthly_topup_cap:
+                extras.append(
+                    "Max monthly topup: "
+                    f"{format_usd_cents(abs(monthly_topup_cap))}"
+                )
+    on_demand_cap = getattr(snapshot, "on_demand_cap_cents", None)
+    if on_demand_cap and on_demand_cap > 0:
+        on_demand_used = getattr(snapshot, "on_demand_used_cents", None)
+        if on_demand_used is None:
+            extras.append(f"Pay-as-you-go cap: {format_usd_cents(on_demand_cap)}")
+        else:
+            extras.append(
+                "Pay-as-you-go: "
+                f"{format_usd_cents(abs(on_demand_used))} / "
+                f"{format_usd_cents(on_demand_cap)}"
+            )
     return ProviderSnapshot(
         "grok",
         "Grok",
@@ -363,7 +377,7 @@ def load_grok() -> ProviderSnapshot:
         tuple(windows),
         status=_freshness(snapshot.updated_at),
         error=error,
-        extras=extras,
+        extras=tuple(extras),
     )
 
 

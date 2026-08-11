@@ -86,8 +86,8 @@ final class BackendContractTests: XCTestCase {
             updatedAt: "2026-07-30T05:01:00Z",
             windows: [
                 UsageWindow(
-                    id: "monthly",
-                    label: "Monthly",
+                    id: "weekly",
+                    label: "7D",
                     usedPercent: 12,
                     resetsAt: nil,
                     detail: nil
