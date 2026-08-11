@@ -29,6 +29,7 @@ from models import (  # noqa: E402
     ProviderSnapshot,
     countdown,
     local_reset_time,
+    local_updated_time,
     parse_timestamp,
     write_snapshot_cache,
 )
@@ -432,9 +433,7 @@ class UnifiedRateIndicator:
                 self._append_info(f"  {icon} {window.label}: {body}{reset}")
             self._append_extras(snapshot.extras)
             if snapshot.updated_at:
-                self._append_info(
-                    f"  Updated: {snapshot.updated_at.replace('T', ' ')[:16]}"
-                )
+                self._append_info(f"  Updated: {local_updated_time(snapshot.updated_at)}")
             if index < len(visible_snapshots) - 1:
                 self.menu.append(Gtk.SeparatorMenuItem())
         self.menu.append(Gtk.SeparatorMenuItem())

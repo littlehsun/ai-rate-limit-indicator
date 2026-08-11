@@ -1,14 +1,28 @@
 import tempfile
 import unittest
+from datetime import timedelta, timezone
 from pathlib import Path
 
-from models import ProviderSnapshot, UsageWindow, countdown, write_snapshot_cache
+from models import (
+    ProviderSnapshot,
+    UsageWindow,
+    countdown,
+    local_updated_time,
+    write_snapshot_cache,
+)
 
 
 class ModelTests(unittest.TestCase):
     def test_countdown_formats_shared_reset_window(self):
         self.assertEqual(countdown(1_000 + 2 * 86400 + 3 * 3600, now=1_000), "2d3h")
         self.assertEqual(countdown(1_000 + 2 * 3600 + 5 * 60, now=1_000), "2h5m")
+
+    def test_updated_time_converts_utc_to_local_timezone(self):
+        taipei = timezone(timedelta(hours=8))
+
+        formatted = local_updated_time("2026-08-11T05:30:00Z", tz=taipei)
+
+        self.assertEqual(formatted, "2026-08-11 13:30")
 
     def test_normalized_cache_contains_all_provider_fields(self):
         snapshot = ProviderSnapshot(

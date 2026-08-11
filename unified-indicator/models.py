@@ -4,7 +4,7 @@ import json
 import os
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, tzinfo
 from pathlib import Path
 from typing import Optional
 
@@ -54,6 +54,16 @@ def local_reset_time(reset_ts: Optional[int]) -> str:
     if reset_ts is None:
         return "--"
     return time.strftime("%Y-%m-%d %H:%M", time.localtime(reset_ts))
+
+
+def local_updated_time(value: str, tz: Optional[tzinfo] = None) -> str:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return value.replace("T", " ")[:16]
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(tz)
+    return parsed.strftime("%Y-%m-%d %H:%M")
 
 
 def parse_timestamp(value: object) -> Optional[int]:
