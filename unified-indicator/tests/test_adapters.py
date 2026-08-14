@@ -460,7 +460,10 @@ class AdapterTests(unittest.TestCase):
                 "agy_rate.fetch_quota_snapshot",
                 side_effect=RuntimeError("AGY is not running"),
             ),
-            patch("agy_rate.fetch_quota_with_cli", return_value=None),
+            patch(
+                "agy_rate.fetch_quota_with_cli",
+                side_effect=AssertionError("a fresh cache needs no spawn"),
+            ),
             patch("agy_rate.read_cache", return_value=cached),
         ):
             snapshot = load_gemini()
@@ -493,10 +496,7 @@ class AdapterTests(unittest.TestCase):
                 side_effect=RuntimeError("AGY is not running"),
             ),
             patch("agy_rate.fetch_quota_with_cli", return_value=started),
-            patch(
-                "agy_rate.read_cache",
-                side_effect=AssertionError("the cache should not be needed"),
-            ),
+            patch("agy_rate.read_cache", return_value=None),
             patch("agy_rate.write_cache") as write_cache,
         ):
             snapshot = load_gemini()

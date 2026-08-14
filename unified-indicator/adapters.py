@@ -429,18 +429,21 @@ def load_gemini() -> ProviderSnapshot:
         write_cache(agy_snapshot)
     except RuntimeError as exc:
         error = str(exc)
+        agy_snapshot = read_cache()
         # Antigravity only listens while it runs, so an idle machine has no
         # endpoint at all. Starting it briefly is the same nudge we use for the
-        # Grok CLI, and it stays opt-in for the same reason.
-        auto_start = read_manager_config().get("AGY_AUTO_START", "false").lower()
-        agy_snapshot = fetch_quota_with_cli(
-            enabled=auto_start in {"1", "true", "yes", "on"}
-        )
-        if agy_snapshot is None:
-            agy_snapshot = read_cache()
-        else:
-            write_cache(agy_snapshot)
-            error = None
+        # Grok CLI, and it stays opt-in for the same reason. Starting it to
+        # refill a cache that is still fresh would burn a process for numbers
+        # we already have, so the stale cache is what earns the spawn.
+        if agy_snapshot is None or _freshness(agy_snapshot.updated_at) != "fresh":
+            auto_start = read_manager_config().get("AGY_AUTO_START", "false").lower()
+            started = fetch_quota_with_cli(
+                enabled=auto_start in {"1", "true", "yes", "on"}
+            )
+            if started is not None:
+                write_cache(started)
+                agy_snapshot = started
+                error = None
 
     if agy_snapshot is None:
         return _no_data("gemini", error)
