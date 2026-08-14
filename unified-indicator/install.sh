@@ -13,6 +13,7 @@ fi
 APP_DIR="$REAL_HOME/.local/share/rate-limit-indicator/unified"
 COLLECTOR_DIR="$APP_DIR/collectors"
 BIN="$REAL_HOME/.local/bin/rate-limit-indicator"
+CLI_BIN="$REAL_HOME/.local/bin/rate-limit-usage"
 SERVICE_DIR="$REAL_HOME/.config/systemd/user"
 SERVICE="$SERVICE_DIR/rate-limit-indicator.service"
 
@@ -41,6 +42,14 @@ exec python3 "$APP_DIR/indicator.py" "\$@"
 EOF
 chmod +x "$BIN"
 
+# The same backend the tray reads, reachable from a terminal. Only the path
+# differs between platforms; the command and its flags do not.
+cat > "$CLI_BIN" <<EOF
+#!/usr/bin/env bash
+exec python3 "$APP_DIR/cli.py" "\$@"
+EOF
+chmod +x "$CLI_BIN"
+
 cat > "$SERVICE" <<EOF
 [Unit]
 Description=Unified AI Rate Limit Indicator
@@ -59,4 +68,5 @@ EOF
 
 systemctl --user daemon-reload 2>/dev/null || true
 echo "Unified indicator: $BIN"
+echo "Usage CLI: $CLI_BIN"
 echo "Unified service: $SERVICE"

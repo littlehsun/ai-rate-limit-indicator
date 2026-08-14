@@ -7,6 +7,7 @@ APP_SUPPORT="$HOME/Library/Application Support/RateLimitIndicator"
 BACKEND_DIR="$APP_SUPPORT/backend"
 COLLECTOR_DIR="$BACKEND_DIR/collectors"
 ASSET_DIR="$APP_SUPPORT/assets"
+CLI_BIN="$HOME/.local/bin/rate-limit-usage"
 APP_DIR="${RATE_LIMIT_INDICATOR_APP_DIR:-$HOME/Applications/Rate Limit Indicator.app}"
 DEFAULT_CONFIG_FILE="$HOME/.config/rate-limit-indicator/providers.env"
 CONFIG_FILE="${RATE_LIMIT_INDICATOR_CONFIG:-}"
@@ -165,6 +166,15 @@ cp "$ROOT_DIR/providers/grok/ubuntu-indicator/grok_rate.py" "$COLLECTOR_DIR/grok
 cp "$ROOT_DIR/providers/gemini/ubuntu-indicator/gemini_rate.py" "$COLLECTOR_DIR/gemini_rate.py"
 cp "$SCRIPT_DIR/poll-provider.sh" "$APP_SUPPORT/poll-provider.sh"
 chmod +x "$BACKEND_DIR/cli.py" "$APP_SUPPORT/poll-provider.sh"
+
+# The same backend the menu bar reads, reachable from a terminal. Only the
+# path differs between platforms; the command and its flags do not.
+mkdir -p "$(dirname "$CLI_BIN")"
+cat > "$CLI_BIN" <<EOF
+#!/usr/bin/env bash
+exec python3 "$BACKEND_DIR/cli.py" "\$@"
+EOF
+chmod +x "$CLI_BIN"
 
 cp "$ROOT_DIR/unified-indicator/assets/codex-logo.png" "$ASSET_DIR/codex-logo.png"
 cp "$ROOT_DIR/unified-indicator/assets/claude-logo.svg" "$ASSET_DIR/claude-logo.svg"
@@ -436,6 +446,7 @@ echo "[5/5] Installed."
 echo "App: $APP_DIR"
 echo "Config: $CONFIG_FILE"
 echo "Backend: $BACKEND_DIR"
+echo "Usage CLI: $CLI_BIN"
 echo
 if [[ "$app_was_running" == true ]]; then
     open "$APP_DIR"

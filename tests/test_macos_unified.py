@@ -233,6 +233,51 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertNotIn("cli-chat-proxy.grok.com", source)
         self.assertNotIn("RetrieveUserQuotaSummary", source)
 
+    def test_usage_cli_wrapper_forwards_its_arguments(self):
+        # The wrapper is written through a heredoc, so the one thing that can
+        # silently break is the "$@" escaping: a wrapper that swallows
+        # --provider looks installed and returns the wrong panel.
+        installer = (MACOS / "install.sh").read_text(encoding="utf-8")
+        body = _heredoc_body(installer, 'cat > "$CLI_BIN" <<EOF')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_dir = Path(tmp)
+            backend = temp_dir / "backend"
+            backend.mkdir()
+            (backend / "cli.py").write_text(
+                "import sys\nprint(' '.join(sys.argv[1:]))\n", encoding="utf-8"
+            )
+            wrapper = temp_dir / "rate-limit-usage"
+            wrapper.write_text(
+                body.replace("$BACKEND_DIR", str(backend)).replace("\\$@", '"$@"'),
+                encoding="utf-8",
+            )
+            wrapper.chmod(0o755)
+
+            result = subprocess.run(
+                [str(wrapper), "--provider", "grok", "--json"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+        self.assertEqual(result.stdout.strip(), "--provider grok --json")
+
+    def test_both_installers_expose_the_same_usage_command(self):
+        mac_installer = (MACOS / "install.sh").read_text(encoding="utf-8")
+        ubuntu_installer = (
+            ROOT / "unified-indicator" / "install.sh"
+        ).read_text(encoding="utf-8")
+
+        # Only the backend path differs between platforms; the command a person
+        # types must not.
+        self.assertIn('CLI_BIN="$HOME/.local/bin/rate-limit-usage"', mac_installer)
+        self.assertIn(
+            'CLI_BIN="$REAL_HOME/.local/bin/rate-limit-usage"', ubuntu_installer
+        )
+        self.assertIn('exec python3 "$BACKEND_DIR/cli.py"', mac_installer)
+        self.assertIn('exec python3 "$APP_DIR/cli.py"', ubuntu_installer)
+
     def test_package_and_installer_target_unified_macos_app(self):
         package = (MACOS / "Package.swift").read_text(encoding="utf-8")
         root_installer = (ROOT / "install.sh").read_text(encoding="utf-8")
@@ -488,6 +533,15 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn("snapshot.indicatorDisplayWindows", views)
         self.assertIn('snapshot.status == "stale" ? "~" : ""', views)
         self.assertIn('snapshot.status == "stale" ? "~" : ""', views)
+
+
+def _heredoc_body(script: str, opener: str) -> str:
+    """Return the lines a `<<EOF` heredoc writes, without running the script."""
+
+    lines = script.splitlines()
+    start = lines.index(opener) + 1
+    end = lines.index("EOF", start)
+    return "\n".join(lines[start:end]) + "\n"
 
 
 if __name__ == "__main__":
