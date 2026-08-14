@@ -234,18 +234,34 @@ def load_snapshots(
 
 def load_codex() -> ProviderSnapshot:
     from codex_rate import default_codex_home, find_latest_snapshot
-    from wham import default_wham_cache_path, format_wham_timestamp, read_wham_snapshot
+    from wham import (
+        default_wham_cache_path,
+        describe_missing_token,
+        format_wham_timestamp,
+        read_wham_snapshot,
+        resolve_access_token,
+    )
 
     source = read_manager_config().get("CODEX_RATE_SOURCE", "local").lower()
+    uses_wham = source in {"auto", "wham"}
     snapshot = None
-    if source in {"auto", "wham"}:
+    if uses_wham:
         snapshot = read_wham_snapshot(Path(default_wham_cache_path()))
     if snapshot is None and source != "wham":
         snapshot = find_latest_snapshot(
             Path(os.environ.get("CODEX_HOME", default_codex_home()))
         )
+
+    # The wham cache only moves while the codex CLI keeps a live token, so an
+    # expired one explains a blank or frozen panel better than silence does.
+    # Local rollout data needs no token, so only ask once wham has let us down.
+    error = None
+    if uses_wham and (snapshot is None or _freshness(snapshot.updated_at) != "fresh"):
+        if resolve_access_token() is None:
+            error = describe_missing_token()
+
     if snapshot is None:
-        return _no_data("codex")
+        return _no_data("codex", error)
 
     windows = []
     if snapshot.five_hour:
@@ -279,17 +295,32 @@ def load_codex() -> ProviderSnapshot:
         updated_at=snapshot.updated_at,
         windows=tuple(windows),
         status=_freshness(snapshot.updated_at),
+        error=error,
         extras=tuple(extras),
     )
 
 
 def load_claude() -> ProviderSnapshot:
-    from claude_oauth import ClaudeOAuthUnavailable, fetch_oauth_snapshot
+    from claude_oauth import (
+        ClaudeOAuthUnavailable,
+        fetch_oauth_snapshot,
+        read_cache,
+        write_cache,
+    )
 
+    # Claude Code owns refreshing this token, and it only does so while it runs.
+    # Keeping the last snapshot means an idle machine shows stale numbers with a
+    # reason instead of an empty panel.
+    error = None
     try:
         oauth_snapshot = fetch_oauth_snapshot()
+        write_cache(oauth_snapshot)
     except ClaudeOAuthUnavailable as exc:
-        return _no_data("claude", str(exc))
+        error = str(exc)
+        oauth_snapshot = read_cache()
+
+    if oauth_snapshot is None:
+        return _no_data("claude", error)
 
     windows = tuple(
         UsageWindow(
@@ -306,6 +337,7 @@ def load_claude() -> ProviderSnapshot:
         oauth_snapshot.updated_at,
         windows,
         status=_freshness(oauth_snapshot.updated_at),
+        error=error,
     )
 
 
@@ -382,16 +414,36 @@ def load_grok() -> ProviderSnapshot:
 
 
 def load_gemini() -> ProviderSnapshot:
-    from agy_rate import fetch_quota_snapshot, read_cache, write_cache
+    from agy_rate import (
+        fetch_quota_snapshot,
+        fetch_quota_with_cli,
+        read_cache,
+        write_cache,
+    )
 
+    # Antigravity owns the quota endpoint. When it is not listening the cached
+    # numbers simply stop moving, and the reason is the useful part to show.
+    error = None
     try:
         agy_snapshot = fetch_quota_snapshot()
         write_cache(agy_snapshot)
-    except RuntimeError:
-        agy_snapshot = read_cache()
+    except RuntimeError as exc:
+        error = str(exc)
+        # Antigravity only listens while it runs, so an idle machine has no
+        # endpoint at all. Starting it briefly is the same nudge we use for the
+        # Grok CLI, and it stays opt-in for the same reason.
+        auto_start = read_manager_config().get("AGY_AUTO_START", "false").lower()
+        agy_snapshot = fetch_quota_with_cli(
+            enabled=auto_start in {"1", "true", "yes", "on"}
+        )
+        if agy_snapshot is None:
+            agy_snapshot = read_cache()
+        else:
+            write_cache(agy_snapshot)
+            error = None
 
     if agy_snapshot is None:
-        return _no_data("gemini")
+        return _no_data("gemini", error)
 
     windows = tuple(
         UsageWindow(
@@ -412,6 +464,7 @@ def load_gemini() -> ProviderSnapshot:
         agy_snapshot.updated_at,
         windows,
         status=_freshness(agy_snapshot.updated_at),
+        error=error,
     )
 
 

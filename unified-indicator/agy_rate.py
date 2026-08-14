@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import ssl
 import subprocess
+import time
 import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass
@@ -13,6 +15,9 @@ from typing import Any, Mapping, Optional
 
 
 QUOTA_PATH = "/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary"
+CLI_START_TIMEOUT = 30.0
+CLI_START_POLL_INTERVAL = 0.25
+CLI_START_COOLDOWN = 300.0
 
 
 @dataclass(frozen=True)
@@ -189,6 +194,151 @@ def fetch_quota_snapshot(
 
     detail = f": {last_error}" if last_error else ""
     raise RuntimeError(f"AGY quota endpoint is unavailable{detail}")
+
+
+def default_start_stamp_path() -> Path:
+    return Path(
+        os.environ.get(
+            "AGY_START_STAMP",
+            Path.home() / ".cache" / "rate-limit-indicator" / "agy-start-attempt",
+        )
+    )
+
+
+def start_is_in_cooldown(
+    stamp_path: Optional[Path] = None,
+    *,
+    now: Optional[float] = None,
+) -> bool:
+    path = stamp_path or default_start_stamp_path()
+    now = time.time() if now is None else now
+    try:
+        last_attempt = float(path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return False
+    # A clock that jumped backwards must not lock the CLI out until it catches
+    # up, so a negative age counts as no cooldown at all.
+    return 0.0 <= now - last_attempt < CLI_START_COOLDOWN
+
+
+def record_start_attempt(
+    stamp_path: Optional[Path] = None,
+    *,
+    now: Optional[float] = None,
+) -> None:
+    path = stamp_path or default_start_stamp_path()
+    now = time.time() if now is None else now
+    try:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        path.write_text(f"{now}\n", encoding="utf-8")
+    except OSError:
+        # Losing the stamp costs the cooldown, not the read. Failing the whole
+        # poll over an unwritable cache directory would be worse.
+        pass
+
+
+def find_agy_cli() -> Optional[str]:
+    """Locate the Antigravity CLI, tolerating a launcher with a bare PATH."""
+
+    override = (os.environ.get("AGY_CLI") or "").strip()
+    if override:
+        return override if os.access(override, os.X_OK) else None
+    found = shutil.which("agy")
+    if found:
+        return found
+    for candidate in (
+        Path.home() / ".local" / "bin" / "agy",
+        Path("/opt/homebrew/bin/agy"),
+        Path("/usr/local/bin/agy"),
+    ):
+        if os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
+
+
+def fetch_quota_with_cli(
+    *,
+    enabled: Optional[bool] = None,
+    timeout: float = 3.0,
+    spawner: Optional[Any] = None,
+    stamp_path: Optional[Path] = None,
+    now: Optional[float] = None,
+    sleep: Any = time.sleep,
+) -> Optional[AgyQuotaSnapshot]:
+    """Start the Antigravity CLI briefly and read quota while it listens.
+
+    `agy models` is used because it authenticates, opens the local quota server
+    within about a second, and spends no model quota. That server only lives for
+    the few seconds the command runs, so the read has to race it rather than
+    start it and come back later. A cold start also has to clear macOS keyring
+    authentication first, which is why the deadline is generous.
+    """
+
+    # Gemini has no poller of its own, so the switch reaches this module from
+    # the shared config through the caller. The environment is the fallback for
+    # anyone driving agy_rate directly.
+    if enabled is None:
+        enabled = _flag_enabled(os.environ.get("AGY_AUTO_START"))
+    if not enabled:
+        return None
+    agy_bin = find_agy_cli()
+    if agy_bin is None:
+        return None
+
+    now = time.time() if now is None else now
+    stamp = stamp_path or default_start_stamp_path()
+    # Stamping before the spawn means a hang or a crash still counts, so a CLI
+    # that cannot sign in does not earn a process on every poll.
+    if start_is_in_cooldown(stamp, now=now):
+        return None
+    record_start_attempt(stamp, now=now)
+
+    spawn = spawner or _spawn_agy_models
+    try:
+        process = spawn(agy_bin)
+    except Exception:
+        return None
+
+    try:
+        deadline = time.monotonic() + CLI_START_TIMEOUT
+        while True:
+            try:
+                return fetch_quota_snapshot(timeout=timeout)
+            except RuntimeError:
+                if time.monotonic() >= deadline:
+                    return None
+                sleep(CLI_START_POLL_INTERVAL)
+    finally:
+        _stop_process(process)
+
+
+def _spawn_agy_models(agy_bin: str) -> subprocess.Popen:
+    return subprocess.Popen(
+        (agy_bin, "models"),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def _stop_process(process: Any) -> None:
+    """Stop the CLI once its quota server has served its purpose."""
+
+    try:
+        if process.poll() is not None:
+            return
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+    except Exception:
+        pass
+
+
+def _flag_enabled(value: Optional[str]) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def parse_quota_payload(

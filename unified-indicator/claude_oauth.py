@@ -7,7 +7,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Optional
@@ -42,6 +42,66 @@ class ClaudeOAuthWindow:
 class ClaudeOAuthSnapshot:
     updated_at: str
     windows: tuple[ClaudeOAuthWindow, ...]
+
+
+def default_cache_path() -> Path:
+    return Path(
+        os.environ.get(
+            "CLAUDE_OAUTH_CACHE",
+            Path.home() / ".cache" / "rate-limit-indicator" / "claude-oauth.json",
+        )
+    )
+
+
+def write_cache(
+    snapshot: ClaudeOAuthSnapshot,
+    cache_path: Optional[Path] = None,
+) -> Path:
+    """Keep the last usage snapshot so an expired token degrades to stale."""
+
+    path = cache_path or default_cache_path()
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path.parent.chmod(0o700)
+    temporary = path.with_name(f".{path.name}.tmp")
+    payload = {
+        "updated_at": snapshot.updated_at,
+        "windows": [asdict(window) for window in snapshot.windows],
+    }
+    try:
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        temporary.chmod(0o600)
+        os.replace(temporary, path)
+        path.chmod(0o600)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+    return path
+
+
+def read_cache(cache_path: Optional[Path] = None) -> Optional[ClaudeOAuthSnapshot]:
+    path = cache_path or default_cache_path()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        windows = tuple(
+            ClaudeOAuthWindow(
+                id=str(item["id"]),
+                used_percent=int(item["used_percent"]),
+                resets_at=str(item["resets_at"]) if item.get("resets_at") else None,
+            )
+            for item in payload.get("windows", [])
+            if isinstance(item, Mapping)
+        )
+        return ClaudeOAuthSnapshot(
+            updated_at=str(payload["updated_at"]),
+            windows=windows,
+        )
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return None
 
 
 def default_credentials_path() -> Path:
@@ -120,6 +180,14 @@ def _parse_credentials(raw: str, now_ms: int) -> ClaudeOAuthCredentials:
 
     oauth = payload.get("claudeAiOauth") if isinstance(payload, Mapping) else None
     if not isinstance(oauth, Mapping):
+        # Claude Code 2.1.x can leave the credential holding MCP server OAuth
+        # state and nothing else. No amount of retrying recovers that shape, so
+        # say the one thing that does.
+        if isinstance(payload, Mapping) and payload.get("mcpOAuth"):
+            raise ClaudeOAuthUnavailable(
+                "Claude stored only MCP server credentials; "
+                "sign in again with `claude auth login`"
+            )
         raise ClaudeOAuthUnavailable(
             "Claude OAuth credentials have no claudeAiOauth entry"
         )

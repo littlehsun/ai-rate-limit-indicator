@@ -8,9 +8,13 @@ from unittest import mock
 
 from claude_oauth import (
     BETA_HEADER,
+    ClaudeOAuthSnapshot,
     ClaudeOAuthUnavailable,
+    ClaudeOAuthWindow,
     fetch_oauth_snapshot,
+    read_cache,
     read_credentials,
+    write_cache,
 )
 
 
@@ -188,6 +192,53 @@ class ClaudeOAuthKeychainTests(unittest.TestCase):
                     now_ms=1_000_000,
                     keychain_reader=self.fail,
                 )
+
+    def test_mcp_only_credentials_point_at_signing_in_again(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "credentials.json"
+            path.write_text(
+                json.dumps({"mcpOAuth": {"some-server": {"accessToken": "x"}}}),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(ClaudeOAuthUnavailable) as caught:
+                read_credentials(path, now_ms=1_000_000)
+
+        self.assertIn("sign in again", str(caught.exception))
+
+    def test_unrecognised_credentials_keep_the_generic_message(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "credentials.json"
+            path.write_text(json.dumps({"somethingElse": {}}), encoding="utf-8")
+
+            with self.assertRaises(ClaudeOAuthUnavailable) as caught:
+                read_credentials(path, now_ms=1_000_000)
+
+        self.assertIn("no claudeAiOauth entry", str(caught.exception))
+
+    def test_cache_roundtrip_keeps_windows_and_owner_only_permissions(self):
+        snapshot = ClaudeOAuthSnapshot(
+            updated_at="2026-07-30T06:00:00+00:00",
+            windows=(
+                ClaudeOAuthWindow("5h", 17, "2026-07-30T11:00:00Z"),
+                ClaudeOAuthWindow("7d", 39, None),
+            ),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "nested" / "claude-oauth.json"
+            write_cache(snapshot, path)
+            loaded = read_cache(path)
+
+            self.assertEqual(loaded, snapshot)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_reading_an_absent_or_broken_cache_returns_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(read_cache(Path(tmp) / "absent.json"))
+
+            broken = Path(tmp) / "broken.json"
+            broken.write_text("{not json", encoding="utf-8")
+            self.assertIsNone(read_cache(broken))
 
 
 if __name__ == "__main__":

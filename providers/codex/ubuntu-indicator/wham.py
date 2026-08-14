@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import sys
@@ -18,6 +19,7 @@ from codex_rate import FIVE_HOUR_MINUTES, WEEKLY_MINUTES, CodexRateSnapshot, Rat
 
 USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 RESET_CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
+TOKEN_EXPIRY_LEEWAY_SECONDS = 60
 
 
 def default_wham_cache_path() -> Path:
@@ -30,12 +32,17 @@ def default_codex_auth_path() -> Path:
     return Path(os.environ.get("CODEX_AUTH_FILE", Path.home() / ".codex" / "auth.json"))
 
 
-def resolve_access_token() -> Optional[str]:
-    return (
-        _optional_str(os.environ.get("CHATGPT_ACCESS_TOKEN"))
-        or _optional_str(os.environ.get("CHATGPT_BEARER_TOKEN"))
-        or read_codex_access_token(default_codex_auth_path())
-    )
+def resolve_access_token(*, now: Optional[int] = None) -> Optional[str]:
+    for candidate in (
+        _optional_str(os.environ.get("CHATGPT_ACCESS_TOKEN")),
+        _optional_str(os.environ.get("CHATGPT_BEARER_TOKEN")),
+        read_codex_access_token(default_codex_auth_path()),
+    ):
+        # An expired token only earns a 401 on every poll. The codex CLI owns
+        # refreshing it, so skip it and let the caller say so.
+        if candidate is not None and not token_is_expired(candidate, now=now):
+            return candidate
+    return None
 
 
 def read_codex_access_token(path: Path) -> Optional[str]:
@@ -50,6 +57,54 @@ def read_codex_access_token(path: Path) -> Optional[str]:
     if not isinstance(tokens, dict):
         return None
     return _optional_str(tokens.get("access_token"))
+
+
+def token_is_expired(token: str, *, now: Optional[int] = None) -> bool:
+    """Report expiry only when the token itself proves it.
+
+    Codex issues a JWT whose `exp` claim carries the deadline, so no extra
+    request is needed. Opaque tokens and JWTs without a readable `exp` stay
+    usable: refusing to send a token we cannot inspect would break the
+    environment overrides for no gain.
+    """
+
+    expires_at = _jwt_expiry(token)
+    if expires_at is None:
+        return False
+    now = int(time.time()) if now is None else now
+    return expires_at <= now + TOKEN_EXPIRY_LEEWAY_SECONDS
+
+
+def describe_missing_token(path: Optional[Path] = None) -> str:
+    """Explain why polling has no usable token, without echoing the token."""
+
+    auth_path = path or default_codex_auth_path()
+    token = read_codex_access_token(auth_path)
+    if token is not None and token_is_expired(token):
+        return (
+            "Codex access token expired; sign in again with the codex CLI "
+            f"({auth_path})"
+        )
+    return (
+        "CHATGPT_ACCESS_TOKEN or "
+        f"{auth_path} tokens.access_token is required for wham polling"
+    )
+
+
+def _jwt_expiry(token: str) -> Optional[int]:
+    parts = token.split(".")
+    if len(parts) != 3:
+        return None
+    payload = parts[1]
+    payload += "=" * (-len(payload) % 4)
+    try:
+        claims = json.loads(base64.urlsafe_b64decode(payload))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(claims, Mapping):
+        return None
+    expires_at = claims.get("exp")
+    return expires_at if isinstance(expires_at, int) else None
 
 
 def fetch_wham_snapshot(
@@ -204,7 +259,7 @@ def main() -> int:
 
     token = resolve_access_token()
     if not token:
-        print("CHATGPT_ACCESS_TOKEN or ~/.codex/auth.json tokens.access_token is required for wham polling", file=sys.stderr)
+        print(describe_missing_token(), file=sys.stderr)
         return 2
 
     try:

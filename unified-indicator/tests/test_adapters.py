@@ -60,13 +60,42 @@ class AdapterTests(unittest.TestCase):
         with patch(
             "claude_oauth.fetch_oauth_snapshot",
             side_effect=ClaudeOAuthUnavailable("no credentials"),
-        ):
+        ), patch("claude_oauth.read_cache", return_value=None):
             snapshot = load_claude()
 
         self.assertEqual(snapshot.provider, "claude")
         self.assertEqual(snapshot.windows, ())
         self.assertEqual(snapshot.status, "no_data")
         self.assertEqual(snapshot.error, "no credentials")
+
+    def test_claude_adapter_keeps_the_last_snapshot_when_the_token_expires(self):
+        cached = ClaudeOAuthSnapshot(
+            updated_at="2026-07-30T06:00:00+00:00",
+            windows=(ClaudeOAuthWindow("5h", 42, None),),
+        )
+        with patch(
+            "claude_oauth.fetch_oauth_snapshot",
+            side_effect=ClaudeOAuthUnavailable("Claude OAuth access token is expired"),
+        ), patch("claude_oauth.read_cache", return_value=cached):
+            snapshot = load_claude()
+
+        # The cached numbers stay visible, with the reason they stopped moving.
+        self.assertEqual(snapshot.windows[0].used_percent, 42)
+        self.assertEqual(snapshot.status, "stale")
+        self.assertIn("expired", snapshot.error)
+
+    def test_claude_adapter_caches_each_successful_fetch(self):
+        oauth_snapshot = ClaudeOAuthSnapshot(
+            updated_at=datetime.now(timezone.utc).isoformat(),
+            windows=(ClaudeOAuthWindow("5h", 17, None),),
+        )
+        with patch(
+            "claude_oauth.fetch_oauth_snapshot", return_value=oauth_snapshot
+        ), patch("claude_oauth.write_cache") as write_cache:
+            snapshot = load_claude()
+
+        write_cache.assert_called_once_with(oauth_snapshot)
+        self.assertIsNone(snapshot.error)
 
     def test_no_data_without_a_reason_leaves_the_error_unset(self):
         snapshot = _no_data("codex")
@@ -85,7 +114,7 @@ class AdapterTests(unittest.TestCase):
         with patch(
             "claude_oauth.fetch_oauth_snapshot",
             return_value=oauth_snapshot,
-        ):
+        ), patch("claude_oauth.write_cache"):
             snapshot = load_claude()
 
         self.assertEqual([window.id for window in snapshot.windows], ["5h", "7d"])
@@ -155,7 +184,7 @@ class AdapterTests(unittest.TestCase):
             with patch.dict("os.environ", {"XDG_CACHE_HOME": tmp}), patch(
                 "adapters.read_manager_config",
                 return_value={"CODEX_RATE_SOURCE": "auto"},
-            ):
+            ), patch("wham.resolve_access_token", return_value="live-token"):
                 snapshot = load_codex()
 
         expected_expiration = datetime.fromisoformat(
@@ -175,7 +204,9 @@ class AdapterTests(unittest.TestCase):
         with patch(
             "adapters.read_manager_config",
             return_value={"CODEX_RATE_SOURCE": "auto"},
-        ), patch("wham.read_wham_snapshot", return_value=Snapshot()):
+        ), patch("wham.read_wham_snapshot", return_value=Snapshot()), patch(
+            "wham.resolve_access_token", return_value="live-token"
+        ):
             snapshot = load_codex()
 
         self.assertEqual(snapshot.extras, ("Reset credits: --",))
@@ -187,10 +218,70 @@ class AdapterTests(unittest.TestCase):
         ), patch(
             "wham.read_wham_snapshot",
             side_effect=AssertionError("wham cache should not be read"),
+        ), patch(
+            "wham.resolve_access_token",
+            side_effect=AssertionError("the token should not be read"),
         ), patch("codex_rate.find_latest_snapshot", return_value=None):
             snapshot = load_codex()
 
         self.assertEqual(snapshot.status, "no_data")
+        self.assertIsNone(snapshot.error)
+
+    def test_codex_adapter_explains_an_expired_sign_in(self):
+        with patch(
+            "adapters.read_manager_config",
+            return_value={"CODEX_RATE_SOURCE": "wham"},
+        ), patch("wham.read_wham_snapshot", return_value=None), patch(
+            "wham.resolve_access_token", return_value=None
+        ), patch(
+            "wham.describe_missing_token", return_value="Codex access token expired"
+        ):
+            snapshot = load_codex()
+
+        self.assertEqual(snapshot.status, "no_data")
+        self.assertEqual(snapshot.error, "Codex access token expired")
+
+    def test_codex_adapter_keeps_stale_numbers_with_the_reason(self):
+        class Snapshot:
+            updated_at = "2026-07-30T08:00:00Z"
+            five_hour = None
+            weekly = None
+            reset_credits_available = None
+            reset_credit_expirations = ()
+
+        with patch(
+            "adapters.read_manager_config",
+            return_value={"CODEX_RATE_SOURCE": "wham"},
+        ), patch("wham.read_wham_snapshot", return_value=Snapshot()), patch(
+            "wham.resolve_access_token", return_value=None
+        ), patch(
+            "wham.describe_missing_token", return_value="Codex access token expired"
+        ):
+            snapshot = load_codex()
+
+        self.assertEqual(snapshot.status, "stale")
+        self.assertEqual(snapshot.error, "Codex access token expired")
+
+    def test_codex_adapter_stays_quiet_while_the_wham_cache_is_fresh(self):
+        class Snapshot:
+            updated_at = datetime.now(timezone.utc).isoformat()
+            five_hour = None
+            weekly = None
+            reset_credits_available = None
+            reset_credit_expirations = ()
+
+        # A fresh cache needs no explanation, so the token is never consulted.
+        with patch(
+            "adapters.read_manager_config",
+            return_value={"CODEX_RATE_SOURCE": "wham"},
+        ), patch("wham.read_wham_snapshot", return_value=Snapshot()), patch(
+            "wham.resolve_access_token",
+            side_effect=AssertionError("the token should not be read"),
+        ):
+            snapshot = load_codex()
+
+        self.assertEqual(snapshot.status, "fresh")
+        self.assertIsNone(snapshot.error)
 
     def test_grok_adapter_labels_weekly_window_as_7d(self):
         class Window:
@@ -345,6 +436,7 @@ class AdapterTests(unittest.TestCase):
                 "agy_rate.fetch_quota_snapshot",
                 side_effect=RuntimeError("AGY is not running"),
             ),
+            patch("agy_rate.fetch_quota_with_cli", return_value=None),
             patch("agy_rate.read_cache", return_value=cached),
         ):
             snapshot = load_gemini()
@@ -352,6 +444,47 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(snapshot.windows[0].label, "Gemini 5H")
         self.assertEqual(snapshot.windows[0].used_percent, 2)
         self.assertEqual(snapshot.status, "stale")
+        # The cached numbers stay visible, with the reason they stopped moving.
+        self.assertEqual(snapshot.error, "AGY is not running")
+
+    def test_gemini_adapter_explains_a_stopped_agy_without_a_cache(self):
+        with (
+            patch(
+                "agy_rate.fetch_quota_snapshot",
+                side_effect=RuntimeError("AGY is not running"),
+            ),
+            patch("agy_rate.fetch_quota_with_cli", return_value=None),
+            patch("agy_rate.read_cache", return_value=None),
+        ):
+            snapshot = load_gemini()
+
+        self.assertEqual(snapshot.status, "no_data")
+        self.assertEqual(snapshot.error, "AGY is not running")
+
+    def test_gemini_adapter_prefers_starting_agy_over_the_cache(self):
+        started = AgyQuotaSnapshot(
+            updated_at=datetime.now(timezone.utc).isoformat(),
+            windows=(AgyQuotaWindow("gemini", "Gemini", "5h", 8, 0.92, None),),
+        )
+        with (
+            patch(
+                "agy_rate.fetch_quota_snapshot",
+                side_effect=RuntimeError("AGY is not running"),
+            ),
+            patch("agy_rate.fetch_quota_with_cli", return_value=started),
+            patch(
+                "agy_rate.read_cache",
+                side_effect=AssertionError("the cache should not be needed"),
+            ),
+            patch("agy_rate.write_cache") as write_cache,
+        ):
+            snapshot = load_gemini()
+
+        write_cache.assert_called_once_with(started)
+        self.assertEqual(snapshot.windows[0].used_percent, 8)
+        self.assertEqual(snapshot.status, "fresh")
+        # Starting Antigravity resolved the problem, so there is nothing to say.
+        self.assertIsNone(snapshot.error)
 
 
 if __name__ == "__main__":

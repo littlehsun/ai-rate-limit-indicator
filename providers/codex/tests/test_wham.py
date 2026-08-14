@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import tempfile
@@ -7,6 +8,7 @@ from unittest.mock import patch
 
 from codex_rate import format_indicator_label
 from wham import (
+    describe_missing_token,
     format_reset_credit_lines,
     merge_reset_credits,
     parse_usage_response,
@@ -14,6 +16,7 @@ from wham import (
     read_codex_access_token,
     read_wham_snapshot,
     resolve_access_token,
+    token_is_expired,
     write_wham_snapshot,
 )
 
@@ -228,6 +231,64 @@ class WhamTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict(os.environ, {"CODEX_AUTH_FILE": str(Path(tmp) / "missing.json")}, clear=True):
                 self.assertIsNone(resolve_access_token())
+
+    def test_never_resolves_an_expired_jwt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            auth_path = Path(tmp) / "auth.json"
+            auth_path.write_text(
+                json.dumps({"tokens": {"access_token": _jwt(exp=1_000)}}),
+                encoding="utf-8",
+            )
+
+            with patch.dict(os.environ, {"CODEX_AUTH_FILE": str(auth_path)}, clear=True):
+                self.assertIsNone(resolve_access_token(now=2_000))
+                self.assertIn("expired", describe_missing_token(auth_path))
+
+    def test_resolves_a_live_jwt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            auth_path = Path(tmp) / "auth.json"
+            token = _jwt(exp=9_000)
+            auth_path.write_text(
+                json.dumps({"tokens": {"access_token": token}}), encoding="utf-8"
+            )
+
+            with patch.dict(os.environ, {"CODEX_AUTH_FILE": str(auth_path)}, clear=True):
+                self.assertEqual(resolve_access_token(now=2_000), token)
+
+    def test_an_expired_env_token_is_skipped_for_the_auth_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            auth_path = Path(tmp) / "auth.json"
+            live = _jwt(exp=9_000)
+            auth_path.write_text(
+                json.dumps({"tokens": {"access_token": live}}), encoding="utf-8"
+            )
+
+            env = {
+                "CHATGPT_ACCESS_TOKEN": _jwt(exp=1_000),
+                "CODEX_AUTH_FILE": str(auth_path),
+            }
+            with patch.dict(os.environ, env, clear=True):
+                self.assertEqual(resolve_access_token(now=2_000), live)
+
+    def test_opaque_tokens_stay_usable(self):
+        # Only a token that proves its own expiry is refused; refusing every
+        # token we cannot parse would break the environment overrides.
+        self.assertFalse(token_is_expired("token-from-env", now=2_000))
+        self.assertFalse(token_is_expired(_jwt(), now=2_000))
+
+    def test_missing_token_message_falls_back_without_an_auth_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            message = describe_missing_token(Path(tmp) / "missing.json")
+
+        self.assertIn("CHATGPT_ACCESS_TOKEN", message)
+        self.assertNotIn("expired", message)
+
+
+def _jwt(**claims: int) -> str:
+    payload = base64.urlsafe_b64encode(
+        json.dumps(claims).encode("utf-8")
+    ).decode("ascii").rstrip("=")
+    return f"header.{payload}.signature"
 
 
 if __name__ == "__main__":

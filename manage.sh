@@ -195,6 +195,16 @@ install_manager() {
         printf '\n# local (default), auto, or wham; auto/wham opt in to network polling.\n' >> "$CONFIG_FILE"
         printf 'CODEX_RATE_SOURCE=%s\n' "$legacy_codex_source" >> "$CONFIG_FILE"
     fi
+    if ! has_config_assignment GROK_AUTO_REFRESH; then
+        printf '\n# true opts in to running `grok models` when the Grok token has\n' >> "$CONFIG_FILE"
+        printf '# expired, so the CLI refreshes its own credential.\n' >> "$CONFIG_FILE"
+        printf 'GROK_AUTO_REFRESH=false\n' >> "$CONFIG_FILE"
+    fi
+    if ! has_config_assignment AGY_AUTO_START; then
+        printf '\n# true opts in to running `agy models` when Antigravity is not\n' >> "$CONFIG_FILE"
+        printf '# listening, which serves Gemini quota for the few seconds it runs.\n' >> "$CONFIG_FILE"
+        printf 'AGY_AUTO_START=false\n' >> "$CONFIG_FILE"
+    fi
     if ! has_config_assignment DISPLAY_MODE; then
         legacy_display="$(read_config_value DISPLAY_PROVIDER)"
         case "$legacy_display" in

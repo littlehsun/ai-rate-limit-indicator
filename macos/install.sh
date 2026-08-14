@@ -216,6 +216,11 @@ if ! grep -Eq '^[[:space:]]*(export[[:space:]]+)?GROK_AUTO_REFRESH[[:space:]]*='
     printf '# expired, so the CLI refreshes its own credential.\n' >> "$CONFIG_FILE"
     printf 'GROK_AUTO_REFRESH=false\n' >> "$CONFIG_FILE"
 fi
+if ! grep -Eq '^[[:space:]]*(export[[:space:]]+)?AGY_AUTO_START[[:space:]]*=' "$CONFIG_FILE"; then
+    printf '\n# true opts in to running `agy models` when Antigravity is not\n' >> "$CONFIG_FILE"
+    printf '# listening, which serves Gemini quota for the few seconds it runs.\n' >> "$CONFIG_FILE"
+    printf 'AGY_AUTO_START=false\n' >> "$CONFIG_FILE"
+fi
 if [[ "$config_file_created" == true || "$CONFIG_FILE" == "$DEFAULT_CONFIG_FILE" ]]; then
     chmod 600 "$CONFIG_FILE"
 fi

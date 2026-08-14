@@ -20,6 +20,7 @@ from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
 DEFAULT_BILLING_URL = "https://cli-chat-proxy.grok.com/v1/billing"
 DEFAULT_USER_AGENT = "grok-rate-indicator/0.1"
 CLI_REFRESH_TIMEOUT = 60.0
+CLI_REFRESH_COOLDOWN = 300.0
 
 
 @dataclass(frozen=True)
@@ -168,10 +169,55 @@ def read_user_id_for_token(
     return None
 
 
+def default_refresh_stamp_path() -> Path:
+    return Path(
+        os.environ.get(
+            "GROK_REFRESH_STAMP",
+            Path.home() / ".cache" / "rate-limit-indicator" / "grok-refresh-attempt",
+        )
+    )
+
+
+def refresh_is_in_cooldown(
+    stamp_path: Optional[Path] = None,
+    *,
+    now: Optional[float] = None,
+) -> bool:
+    """Report whether the last nudge is recent enough to skip this one."""
+
+    path = stamp_path or default_refresh_stamp_path()
+    now = time.time() if now is None else now
+    try:
+        last_attempt = float(path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return False
+    # A clock that jumped backwards must not lock the nudge out until it
+    # catches up, so a negative age counts as no cooldown at all.
+    return 0.0 <= now - last_attempt < CLI_REFRESH_COOLDOWN
+
+
+def record_refresh_attempt(
+    stamp_path: Optional[Path] = None,
+    *,
+    now: Optional[float] = None,
+) -> None:
+    path = stamp_path or default_refresh_stamp_path()
+    now = time.time() if now is None else now
+    try:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        path.write_text(f"{now}\n", encoding="utf-8")
+    except OSError:
+        # Losing the stamp costs us the cooldown, not the refresh. Failing the
+        # whole poll over an unwritable cache directory would be worse.
+        pass
+
+
 def refresh_token_with_cli(
     grok_home: Optional[Path] = None,
     *,
     runner: Optional[Any] = None,
+    stamp_path: Optional[Path] = None,
+    now: Optional[float] = None,
 ) -> Optional[str]:
     """Ask the Grok CLI to refresh its own token, and return the fresh one.
 
@@ -186,6 +232,16 @@ def refresh_token_with_cli(
     grok_bin = find_grok_cli()
     if grok_bin is None:
         return None
+
+    now = time.time() if now is None else now
+    stamp = stamp_path or default_refresh_stamp_path()
+    # The poller fires every 60s. Without a cooldown, a CLI that cannot refresh
+    # earns a fresh 60s-timeout subprocess every tick for as long as it stays
+    # broken. Stamping before the run means a hang or a crash still counts.
+    if refresh_is_in_cooldown(stamp, now=now):
+        return None
+    record_refresh_attempt(stamp, now=now)
+
     run = runner or _run_grok_models
     try:
         run(grok_bin)

@@ -26,6 +26,8 @@ from grok_rate import (
     find_grok_cli,
     read_access_token,
     read_user_id_for_token,
+    record_refresh_attempt,
+    refresh_is_in_cooldown,
     refresh_token_with_cli,
     read_cache,
     write_cache,
@@ -280,7 +282,10 @@ class GrokRateTests(unittest.TestCase):
                 "grok_rate.shutil.which", return_value="/usr/bin/grok"
             ):
                 self.assertEqual(
-                    refresh_token_with_cli(home, runner=fake_cli), "refreshed"
+                    refresh_token_with_cli(
+                        home, runner=fake_cli, stamp_path=home / "stamp"
+                    ),
+                    "refreshed",
                 )
 
     def test_cli_refresh_survives_a_failing_cli(self):
@@ -299,7 +304,64 @@ class GrokRateTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {"GROK_AUTO_REFRESH": "1"}), mock.patch(
                 "grok_rate.shutil.which", return_value="/usr/bin/grok"
             ):
-                self.assertIsNone(refresh_token_with_cli(home, runner=boom))
+                self.assertIsNone(
+                    refresh_token_with_cli(
+                        home, runner=boom, stamp_path=home / "stamp"
+                    )
+                )
+
+    def test_cli_refresh_waits_out_the_cooldown_after_a_failure(self):
+        # The poller fires every 60s; a CLI that cannot refresh must not earn a
+        # subprocess on every tick.
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            stamp = home / "stamp"
+            (home / "auth.json").write_text(
+                json.dumps(
+                    {"e": {"key": "old", "expires_at": "2020-01-01T00:00:00+00:00"}}
+                ),
+                encoding="utf-8",
+            )
+            calls = []
+
+            with mock.patch.dict(os.environ, {"GROK_AUTO_REFRESH": "1"}), mock.patch(
+                "grok_rate.shutil.which", return_value="/usr/bin/grok"
+            ):
+                refresh_token_with_cli(
+                    home, runner=calls.append, stamp_path=stamp, now=1_000.0
+                )
+                self.assertEqual(len(calls), 1)
+
+                # One minute later: still inside the cooldown.
+                refresh_token_with_cli(
+                    home, runner=calls.append, stamp_path=stamp, now=1_060.0
+                )
+                self.assertEqual(len(calls), 1)
+
+                # Past the cooldown, the nudge is allowed through again.
+                refresh_token_with_cli(
+                    home, runner=calls.append, stamp_path=stamp, now=1_400.0
+                )
+                self.assertEqual(len(calls), 2)
+
+    def test_cooldown_ignores_a_stamp_from_the_future(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stamp = Path(tmp) / "stamp"
+            record_refresh_attempt(stamp, now=9_000.0)
+
+            # A clock that jumped backwards must not lock the nudge out until
+            # it catches up.
+            self.assertFalse(refresh_is_in_cooldown(stamp, now=1_000.0))
+            self.assertTrue(refresh_is_in_cooldown(stamp, now=9_100.0))
+            self.assertFalse(refresh_is_in_cooldown(stamp, now=9_500.0))
+
+    def test_cooldown_treats_an_unreadable_stamp_as_no_cooldown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertFalse(refresh_is_in_cooldown(Path(tmp) / "absent"))
+
+            broken = Path(tmp) / "broken"
+            broken.write_text("not a timestamp", encoding="utf-8")
+            self.assertFalse(refresh_is_in_cooldown(broken))
 
     def test_cli_is_found_through_the_installer_override(self):
         # A launchd/systemd poller gets a bare PATH, so `which` finds nothing
