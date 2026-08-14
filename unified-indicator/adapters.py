@@ -445,6 +445,12 @@ def load_gemini() -> ProviderSnapshot:
     if agy_snapshot is None:
         return _no_data("gemini", error)
 
+    # Antigravity not listening is only worth saying once the cached numbers
+    # have gone stale. Auto-start stops it on purpose after each read, so a
+    # fresh cache alongside "not running" is our own doing, not a fault.
+    if _freshness(agy_snapshot.updated_at) == "fresh":
+        error = None
+
     windows = tuple(
         UsageWindow(
             id=(

@@ -447,6 +447,27 @@ class AdapterTests(unittest.TestCase):
         # The cached numbers stay visible, with the reason they stopped moving.
         self.assertEqual(snapshot.error, "AGY is not running")
 
+    def test_gemini_adapter_stays_quiet_while_the_cache_is_still_fresh(self):
+        # Auto-start stops Antigravity on purpose once it has served the read,
+        # so every poll inside the cooldown finds it gone. Saying so over
+        # seconds-old numbers would make our own cleanup look like a fault.
+        cached = AgyQuotaSnapshot(
+            updated_at=datetime.now(timezone.utc).isoformat(),
+            windows=(AgyQuotaWindow("gemini", "Gemini", "5h", 5, 0.95, None),),
+        )
+        with (
+            patch(
+                "agy_rate.fetch_quota_snapshot",
+                side_effect=RuntimeError("AGY is not running"),
+            ),
+            patch("agy_rate.fetch_quota_with_cli", return_value=None),
+            patch("agy_rate.read_cache", return_value=cached),
+        ):
+            snapshot = load_gemini()
+
+        self.assertEqual(snapshot.status, "fresh")
+        self.assertIsNone(snapshot.error)
+
     def test_gemini_adapter_explains_a_stopped_agy_without_a_cache(self):
         with (
             patch(
