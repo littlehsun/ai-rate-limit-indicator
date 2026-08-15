@@ -233,6 +233,66 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertNotIn("cli-chat-proxy.grok.com", source)
         self.assertNotIn("RetrieveUserQuotaSummary", source)
 
+    def test_poller_trims_a_log_that_outgrew_its_cap(self):
+        # launchd never rotates StandardErrorPath, so a provider that keeps
+        # failing writes the same line every 60s until the disk notices.
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_dir = Path(tmp)
+            logs = temp_dir / "logs"
+            logs.mkdir()
+            err = logs / "grok-poll.err.log"
+            err.write_text(
+                "".join(f"line {i} repeated failure padding\n" for i in range(40000)),
+                encoding="utf-8",
+            )
+            original = err.stat().st_size
+            config = temp_dir / "providers.env"
+            config.write_text("GROK=false\n", encoding="utf-8")
+
+            subprocess.run(
+                ["bash", str(MACOS / "poll-provider.sh"), "grok"],
+                env={
+                    **os.environ,
+                    "RATE_LIMIT_INDICATOR_LOG_DIR": str(logs),
+                    "RATE_LIMIT_INDICATOR_CONFIG": str(config),
+                },
+                capture_output=True,
+                check=True,
+            )
+
+            trimmed = err.read_text(encoding="utf-8")
+            # Trimming must not leave its staging file behind.
+            self.assertEqual(list(logs.iterdir()), [err])
+
+        self.assertLess(err_size := len(trimmed.encode("utf-8")), original)
+        self.assertLessEqual(err_size, 1048576)
+        # The newest lines are the ones worth keeping.
+        self.assertIn("line 39999", trimmed)
+        self.assertNotIn("line 0 ", trimmed)
+
+    def test_poller_leaves_a_log_under_the_cap_alone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_dir = Path(tmp)
+            logs = temp_dir / "logs"
+            logs.mkdir()
+            err = logs / "grok-poll.err.log"
+            err.write_text("one short line\n", encoding="utf-8")
+            config = temp_dir / "providers.env"
+            config.write_text("GROK=false\n", encoding="utf-8")
+
+            subprocess.run(
+                ["bash", str(MACOS / "poll-provider.sh"), "grok"],
+                env={
+                    **os.environ,
+                    "RATE_LIMIT_INDICATOR_LOG_DIR": str(logs),
+                    "RATE_LIMIT_INDICATOR_CONFIG": str(config),
+                },
+                capture_output=True,
+                check=True,
+            )
+
+            self.assertEqual(err.read_text(encoding="utf-8"), "one short line\n")
+
     def test_usage_cli_wrapper_forwards_its_arguments(self):
         # The wrapper is written through a heredoc, so the one thing that can
         # silently break is the "$@" escaping: a wrapper that swallows

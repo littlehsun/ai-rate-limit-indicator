@@ -5,12 +5,32 @@ APP_SUPPORT="${RATE_LIMIT_INDICATOR_APP_SUPPORT:-$HOME/Library/Application Suppo
 CONFIG_FILE="${RATE_LIMIT_INDICATOR_CONFIG:-$HOME/.config/rate-limit-indicator/providers.env}"
 PYTHON_BIN="${RATE_LIMIT_INDICATOR_PYTHON:-$(command -v python3 || true)}"
 WHAM_ENV="${CODEX_RATE_WHAM_ENV:-$HOME/.config/codex-rate-indicator/wham.env}"
+LOG_DIR="${RATE_LIMIT_INDICATOR_LOG_DIR:-$HOME/Library/Logs/RateLimitIndicator}"
+LOG_MAX_BYTES="${RATE_LIMIT_INDICATOR_LOG_MAX_BYTES:-1048576}"
 provider="${1:-}"
 
 if [[ -z "$PYTHON_BIN" || ! -x "$PYTHON_BIN" ]]; then
     echo "python3 executable not found: ${PYTHON_BIN:-unset}" >&2
     exit 1
 fi
+
+trim_log() {
+    # launchd appends to these forever with no rotation of its own, and a
+    # provider that keeps failing writes the same line every 60s: one err log
+    # reached 3.9 MB that way. Keep the tail rather than emptying the file,
+    # because the newest lines are the ones worth reading, and truncate in
+    # place so the descriptor launchd already opened stays valid.
+    local log="$1"
+    local size
+    size="$(/usr/bin/stat -f%z "$log" 2>/dev/null || echo 0)"
+    [[ "$size" -le "$LOG_MAX_BYTES" ]] && return 0
+
+    local staged="$log.trim"
+    if /usr/bin/tail -c "$((LOG_MAX_BYTES / 2))" "$log" > "$staged" 2>/dev/null; then
+        cat "$staged" > "$log" 2>/dev/null || true
+    fi
+    rm -f "$staged"
+}
 
 is_enabled() {
     local key="$1"
@@ -201,6 +221,13 @@ load_wham_environment() {
         export "$key=$value"
     done < "$WHAM_ENV"
 }
+
+case "$provider" in
+    codex|grok)
+        trim_log "$LOG_DIR/$provider-poll.out.log"
+        trim_log "$LOG_DIR/$provider-poll.err.log"
+        ;;
+esac
 
 case "$provider" in
     resolve-codex-cache)
