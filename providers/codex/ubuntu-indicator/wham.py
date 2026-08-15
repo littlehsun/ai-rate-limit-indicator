@@ -81,8 +81,11 @@ def describe_missing_token(path: Optional[Path] = None) -> str:
     auth_path = path or default_codex_auth_path()
     token = read_codex_access_token(auth_path)
     if token is not None and token_is_expired(token):
+        # The refresh token usually outlives the access token, so running the
+        # CLI once is enough. Telling people to sign in again would send them
+        # through a login they almost certainly do not need.
         return (
-            "Codex access token expired; sign in again with the codex CLI "
+            "Codex access token expired; run the codex CLI once to refresh it "
             f"({auth_path})"
         )
     return (
