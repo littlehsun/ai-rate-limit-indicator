@@ -15,7 +15,7 @@ class Stack {
   addSpacer() {}
   addStack() { const s = new Stack(this.sink); this.sink.push({ type: "stack", node: s }); return s; }
   addText(t) { const n = { type: "text", text: t }; this.sink.push(n); return n; }
-  addImage() { this.sink.push({ type: "text", text: "[wifi.slash]" }); return {}; }
+  addImage(i) { this.sink.push({ type: "text", text: `[${(i&&i.sym)||"image"}]` }); return {}; }
 }
 
 class ListWidget {
@@ -40,7 +40,8 @@ globalThis.Font = new Proxy({}, { get: () => (n) => ({ n }) });
 globalThis.Size = function (w, h) { return { w, h }; };
 globalThis.ListWidget = ListWidget;
 globalThis.args = { widgetParameter: null };
-globalThis.SFSymbol = { named: () => ({ applyFont() {}, image: { sym: true } }) };
+globalThis.__sym = null;
+globalThis.SFSymbol = { named: (n) => { globalThis.__sym = n; return { applyFont() {}, image: { sym: n } }; } };
 globalThis.Rect = function (x, y, w, h) { return { x, y, w, h }; };
 globalThis.Point = function (x, y) { return { x, y }; };
 globalThis.Path = class { addLines() {} };
@@ -103,8 +104,10 @@ console.log("\n=== LARGE（正常）===");
 for (const line of await render("large")) console.log("  " + line);
 
 for (const fam of ["accessoryCircular", "accessoryRectangular"]) {
-  console.log(`\n=== ${fam} ===`);
+  console.log(`\n=== ${fam}（正常）===`);
   for (const line of await render(fam)) console.log("  " + line);
+  console.log(`=== ${fam}（連不上）===`);
+  for (const line of await render(fam, { fail: true, cached: true, cacheAge: Date.now() - 3*3600*1000 })) console.log("  " + line);
 }
 
 console.log("\n=== 行數檢查 ===");

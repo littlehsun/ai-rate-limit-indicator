@@ -420,6 +420,10 @@ function buildAccessory(state, family) {
   }
 
   const rows = accessoryRows(state.payload);
+  // A Lock Screen glance has no room to explain itself, but showing an hours
+  // old number as if it were current is worse than one extra character.
+  const age = state.fetchedAt ? Date.now() - state.fetchedAt : null;
+  const mark = !state.reachable || (age !== null && age > STALE_AFTER_MS) ? "~" : "";
 
   if (family === "accessoryCircular") {
     // One number is all a circle holds. By default it holds whichever is
@@ -437,8 +441,9 @@ function buildAccessory(state, family) {
     const line = box.addStack();
     line.layoutHorizontally();
     line.addSpacer();
-    const value = line.addText(`${worst.window.used_percent}`);
+    const value = line.addText(`${mark}${worst.window.used_percent}`);
     value.font = Font.boldSystemFont(15);
+    value.minimumScaleFactor = 0.7;
     line.addSpacer();
     const tag = box.addStack();
     tag.layoutHorizontally();
@@ -464,7 +469,7 @@ function buildAccessory(state, family) {
     name.font = Font.systemFont(11);
     name.lineLimit = 1;
     line.addSpacer();
-    const value = line.addText(`${row.window.used_percent}%`);
+    const value = line.addText(`${mark}${row.window.used_percent}%`);
     value.font = Font.semiboldSystemFont(11);
   }
   return widget;
