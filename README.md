@@ -124,6 +124,16 @@ DROPDOWN_PROVIDERS=codex,claude,grok,gemini
 
 # Shared order for both the panel and dropdown.
 PROVIDER_ORDER=codex,grok,claude,gemini
+
+# true runs `grok models` once the Grok token has expired, so the CLI
+# refreshes its own credential. Grok tokens last about six hours, so without
+# this an idle machine shows stale Grok numbers every morning.
+GROK_AUTO_REFRESH=false
+
+# true runs `agy models` when Antigravity is not listening. Antigravity only
+# serves quota while it runs, so this starts it for the few seconds a read
+# takes and stops it again.
+AGY_AUTO_START=false
 ```
 
 `DISPLAY_MODE=auto` selects the fresh provider whose 7D usage changed most
@@ -164,6 +174,97 @@ The normalized runtime cache is written to:
 ```text
 ~/.cache/rate-limit-indicator/snapshots.json
 ```
+
+## Phone widget
+
+An iPhone widget reads the same normalized snapshot the desktop UI writes. The
+phone never holds a provider credential and never talks to Anthropic, OpenAI,
+xAI, or Google: it fetches one JSON file from a machine you already run this on.
+
+### What is required
+
+- **Tailscale** on both the publishing machine and the phone, on the same
+  tailnet. The publisher binds to the Tailscale interface only, so nothing on
+  any other network can reach it.
+- **[Scriptable](https://scriptable.app)** on the phone. It is free and needs
+  no Apple Developer account, so the widget never expires.
+
+### 1. Publish the snapshot
+
+```bash
+python3 ~/.local/share/rate-limit-indicator/unified/publish.py   # Linux
+python3 ~/Library/Application\ Support/RateLimitIndicator/backend/publish.py   # macOS
+```
+
+It prints the address it bound to, and refuses to start when no Tailscale
+address exists rather than falling back to a wildcard bind. It serves exactly
+one route, `/usage.json`, and reads the cache per request.
+
+The snapshot itself is whatever the desktop UI last wrote, so **the tray or
+menu bar has to be running** for the numbers to move. Nothing here polls the
+providers: a phone driving `load_snapshots()` would spend the Claude usage
+budget on top of what the desktop already spends.
+
+There is **no service unit yet**. The publisher stops when you close the
+terminal and does not come back after a reboot.
+
+### 2. Install the widget
+
+Copy `mobile/usage-widget.js` into Scriptable. With iCloud sync on, that is:
+
+```bash
+cp mobile/usage-widget.js \
+  ~/Library/Mobile\ Documents/iCloud~dk~simonbs~Scriptable/Documents/"Rate Limits.js"
+```
+
+Otherwise paste the file into a new script in the app.
+
+### 3. Point it at the publisher
+
+The script ships with a loopback default, because this repository is public and
+must not carry anyone's address. Set your own either way:
+
+- **Widget parameter** (preferred, nothing to edit): long-press the widget →
+  Edit Widget → Parameter → `http://<your-tailscale-ip>:8477/usage.json`
+- **In the script**: change `DEFAULT_ENDPOINT` at the top
+
+Run the script once in Scriptable before adding it to a screen. Errors surface
+there rather than as a silently blank tile.
+
+### Sizes
+
+| Size | Shows |
+| --- | --- |
+| Small | One line per provider; Claude carries 5H and 7D on one line |
+| Medium | One block per provider, with percentage and reset |
+| Large | One block per window, so Antigravity's four appear in full |
+| Lock Screen circular | Ring gauge for whichever window is closest to running out |
+| Lock Screen rectangular | Every provider, one line each |
+
+Lock Screen sizes are rendered monochrome by iOS, so severity colour is
+unavailable there and fill proportion carries it instead.
+
+Settings live at the top of `usage-widget.js`: `SMALL_ROWS` chooses the small
+widget's rows, `CIRCULAR_PROVIDER` pins the circular gauge to one provider
+instead of following the worst, and `PREVIEW_FAMILY` picks which size the app
+renders when you tap play.
+
+### What it cannot do
+
+iOS decides when a widget re-runs, and the daily refresh budget is far below
+the five minutes the script asks for; expect tens of minutes. The header prints
+the snapshot's own wall clock rather than an age, because a widget that has not
+re-run cannot tell how long it has been sitting there. Tapping the widget with
+`When Interacting: Run Script` re-reads immediately.
+
+If the publisher is unreachable the widget keeps the last snapshot it fetched
+and marks it, rather than blanking.
+
+### Before serving on a shared tailnet
+
+Anything on the tailnet that can route to the publishing machine can read the
+snapshot. Check whether the tailnet has shared nodes or users beyond your own
+before treating it as private; `tailscale status` lists owners.
 
 ## Security
 
