@@ -38,6 +38,13 @@ globalThis.Color.dynamic = (a, b) => ({ light: a, dark: b });
 globalThis.Font = new Proxy({}, { get: () => (n) => ({ n }) });
 globalThis.Size = function (w, h) { return { w, h }; };
 globalThis.ListWidget = ListWidget;
+globalThis.Rect = function (x, y, w, h) { return { x, y, w, h }; };
+globalThis.Point = function (x, y) { return { x, y }; };
+globalThis.Path = class { addLines() {} };
+globalThis.DrawContext = class {
+  setLineWidth() {} setStrokeColor() {} strokeEllipse() {}
+  addPath() {} strokePath() {} getImage() { return { image: true }; }
+};
 
 const payload = JSON.parse(fs.readFileSync(SNAPSHOT, "utf8"));
 globalThis.Request = class {
@@ -91,6 +98,11 @@ for (const line of await render("small", { fail: true, cached: false })) console
 
 console.log("\n=== LARGE（正常）===");
 for (const line of await render("large")) console.log("  " + line);
+
+for (const fam of ["accessoryCircular", "accessoryRectangular"]) {
+  console.log(`\n=== ${fam} ===`);
+  for (const line of await render(fam)) console.log("  " + line);
+}
 
 console.log("\n=== 行數檢查 ===");
 // A row starts with its label; percentages and reset times trail it.

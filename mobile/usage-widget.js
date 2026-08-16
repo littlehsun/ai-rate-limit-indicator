@@ -85,6 +85,22 @@ function ageLabel(milliseconds) {
   return `${Math.floor(hours / 24)}d${hours % 24}h`;
 }
 
+function snapshotTime(payload) {
+  // The moment the desktop last refreshed, not the moment we fetched it. A
+  // frozen widget cannot tell how long it has been frozen, but a wall clock
+  // printed into the tile stays true however long it sits there.
+  let newest = null;
+  for (const provider of payload.providers) {
+    const parsed = Date.parse(provider.updated_at || "");
+    if (!Number.isNaN(parsed) && (newest === null || parsed > newest)) newest = parsed;
+  }
+  return newest === null ? null : new Date(newest);
+}
+
+function clockLabel(date) {
+  return `${date.getHours()}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
 function resetLabel(resetsAt) {
   if (!resetsAt) return "";
   const remaining = resetsAt * 1000 - Date.now();
@@ -325,6 +341,109 @@ function smallRows(payload) {
   return rows;
 }
 
+// Lock Screen and StandBy widgets are rendered monochrome by iOS, so the
+// severity colours are gone and the fill proportion has to carry the meaning.
+function accessoryGauge(percent, size) {
+  const ctx = new DrawContext();
+  ctx.size = new Size(size, size);
+  ctx.opaque = false;
+  ctx.respectScreenScale = true;
+
+  const stroke = 6;
+  const radius = (size - stroke) / 2;
+  const centre = size / 2;
+
+  ctx.setLineWidth(stroke);
+  ctx.setStrokeColor(new Color("#FFFFFF", 0.28));
+  ctx.strokeEllipse(new Rect(stroke / 2, stroke / 2, size - stroke, size - stroke));
+
+  const swept = (Math.min(Math.max(percent, 0), 100) / 100) * 2 * Math.PI;
+  if (swept > 0) {
+    const start = -Math.PI / 2;
+    const steps = Math.max(2, Math.round(swept / 0.06));
+    const points = [];
+    for (let i = 0; i <= steps; i += 1) {
+      const angle = start + (swept * i) / steps;
+      points.push(new Point(centre + radius * Math.cos(angle), centre + radius * Math.sin(angle)));
+    }
+    const path = new Path();
+    path.addLines(points);
+    ctx.addPath(path);
+    ctx.setStrokeColor(new Color("#FFFFFF"));
+    ctx.setLineWidth(stroke);
+    ctx.strokePath();
+  }
+  return ctx.getImage();
+}
+
+function accessoryRows(payload) {
+  return SMALL_ROWS.map((wanted) => {
+    const provider = payload.providers.find((p) => p.provider === wanted.provider);
+    if (!provider || provider.windows.length === 0) return null;
+    const windows = wanted.windows
+      ? wanted.windows.map((id) => provider.windows.find((w) => w.id === id)).filter(Boolean)
+      : provider.windows.slice(0, 1);
+    const window = windows.length ? tightest(windows) : provider.windows[0];
+    return { label: cellLabel(provider), window };
+  }).filter(Boolean);
+}
+
+function buildAccessory(state, family) {
+  const widget = new ListWidget();
+  widget.setPadding(0, 0, 0, 0);
+  widget.refreshAfterDate = new Date(Date.now() + REFRESH_AFTER_MS);
+
+  if (!state.payload) {
+    const message = widget.addText("no data");
+    message.font = Font.systemFont(12);
+    return widget;
+  }
+
+  const rows = accessoryRows(state.payload);
+
+  if (family === "accessoryCircular") {
+    // One number is all a circle holds, so it holds the worst one.
+    const worst = rows.reduce((a, b) => (b.window.used_percent > a.window.used_percent ? b : a), rows[0]);
+    const size = 58;
+    const box = widget.addStack();
+    box.size = new Size(size, size);
+    box.backgroundImage = accessoryGauge(worst.window.used_percent, size);
+    box.layoutVertically();
+    box.addSpacer();
+    const line = box.addStack();
+    line.layoutHorizontally();
+    line.addSpacer();
+    const value = line.addText(`${worst.window.used_percent}`);
+    value.font = Font.boldSystemFont(15);
+    line.addSpacer();
+    const tag = box.addStack();
+    tag.layoutHorizontally();
+    tag.addSpacer();
+    const name = tag.addText(worst.label.slice(0, 6));
+    name.font = Font.systemFont(8);
+    tag.addSpacer();
+    box.addSpacer();
+    return widget;
+  }
+
+  // accessoryRectangular: every provider, one compact line each.
+  widget.setPadding(1, 2, 1, 2);
+  for (const [index, row] of rows.entries()) {
+    if (index > 0) widget.addSpacer(2);
+    const line = widget.addStack();
+    line.layoutHorizontally();
+    line.centerAlignContent();
+    const name = line.addText(row.label);
+    name.font = Font.systemFont(11);
+    name.lineLimit = 1;
+    name.minimumScaleFactor = 0.6;
+    line.addSpacer();
+    const value = line.addText(`${row.window.used_percent}%`);
+    value.font = Font.boldSystemFont(11);
+  }
+  return widget;
+}
+
 function buildWidget(state, family) {
   const widget = new ListWidget();
   widget.setPadding(12, 13, 12, 13);
@@ -361,10 +480,11 @@ function buildWidget(state, family) {
   title.font = Font.boldSystemFont(12);
   title.textColor = INK;
   header.addSpacer();
-  if (offline || oldData) {
-    const badge = header.addText(age === null ? "offline" : ageLabel(age));
+  const stamp = snapshotTime(state.payload);
+  if (stamp || offline) {
+    const badge = header.addText(stamp ? clockLabel(stamp) : "offline");
     badge.font = Font.systemFont(9);
-    badge.textColor = offline ? AMBER : INK_3;
+    badge.textColor = offline || oldData ? AMBER : INK_3;
   }
   widget.addSpacer(8);
 
@@ -426,7 +546,9 @@ const PREVIEW_FAMILY = "large";
 
 const state = await loadPayload();
 const family = config.widgetFamily || PREVIEW_FAMILY;
-const widget = buildWidget(state, family);
+const widget = family.startsWith("accessory")
+  ? buildAccessory(state, family)
+  : buildWidget(state, family);
 
 if (config.runsInWidget) {
   Script.setWidget(widget);
@@ -434,6 +556,10 @@ if (config.runsInWidget) {
   await widget.presentSmall();
 } else if (family === "large") {
   await widget.presentLarge();
+} else if (family === "accessoryCircular") {
+  await widget.presentAccessoryCircular();
+} else if (family === "accessoryRectangular") {
+  await widget.presentAccessoryRectangular();
 } else {
   await widget.presentMedium();
 }
