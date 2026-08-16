@@ -160,12 +160,13 @@ cp "$ROOT_DIR/unified-indicator/adapters.py" "$BACKEND_DIR/adapters.py"
 cp "$ROOT_DIR/unified-indicator/agy_rate.py" "$BACKEND_DIR/agy_rate.py"
 cp "$ROOT_DIR/unified-indicator/claude_oauth.py" "$BACKEND_DIR/claude_oauth.py"
 cp "$ROOT_DIR/unified-indicator/cli.py" "$BACKEND_DIR/cli.py"
+cp "$ROOT_DIR/unified-indicator/publish.py" "$BACKEND_DIR/publish.py"
 cp "$ROOT_DIR/providers/codex/ubuntu-indicator/codex_rate.py" "$COLLECTOR_DIR/codex_rate.py"
 cp "$ROOT_DIR/providers/codex/ubuntu-indicator/wham.py" "$COLLECTOR_DIR/wham.py"
 cp "$ROOT_DIR/providers/grok/ubuntu-indicator/grok_rate.py" "$COLLECTOR_DIR/grok_rate.py"
 cp "$ROOT_DIR/providers/gemini/ubuntu-indicator/gemini_rate.py" "$COLLECTOR_DIR/gemini_rate.py"
 cp "$SCRIPT_DIR/poll-provider.sh" "$APP_SUPPORT/poll-provider.sh"
-chmod +x "$BACKEND_DIR/cli.py" "$APP_SUPPORT/poll-provider.sh"
+chmod +x "$BACKEND_DIR/cli.py" "$BACKEND_DIR/publish.py" "$APP_SUPPORT/poll-provider.sh"
 
 # The same backend the menu bar reads, reachable from a terminal. Only the
 # path differs between platforms; the command and its flags do not.

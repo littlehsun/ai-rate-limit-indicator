@@ -28,13 +28,14 @@ cp "$SCRIPT_DIR/adapters.py" "$APP_DIR/adapters.py"
 cp "$SCRIPT_DIR/agy_rate.py" "$APP_DIR/agy_rate.py"
 cp "$SCRIPT_DIR/claude_oauth.py" "$APP_DIR/claude_oauth.py"
 cp "$SCRIPT_DIR/cli.py" "$APP_DIR/cli.py"
+cp "$SCRIPT_DIR/publish.py" "$APP_DIR/publish.py"
 cp "$SCRIPT_DIR/indicator.py" "$APP_DIR/indicator.py"
 cp "$SCRIPT_DIR/assets/"* "$APP_DIR/assets/"
 cp "$ROOT_DIR/providers/codex/ubuntu-indicator/codex_rate.py" "$COLLECTOR_DIR/codex_rate.py"
 cp "$ROOT_DIR/providers/codex/ubuntu-indicator/wham.py" "$COLLECTOR_DIR/wham.py"
 cp "$ROOT_DIR/providers/grok/ubuntu-indicator/grok_rate.py" "$COLLECTOR_DIR/grok_rate.py"
 cp "$ROOT_DIR/providers/gemini/ubuntu-indicator/gemini_rate.py" "$COLLECTOR_DIR/gemini_rate.py"
-chmod +x "$APP_DIR/cli.py" "$APP_DIR/indicator.py"
+chmod +x "$APP_DIR/cli.py" "$APP_DIR/publish.py" "$APP_DIR/indicator.py"
 
 cat > "$BIN" <<EOF
 #!/usr/bin/env bash
