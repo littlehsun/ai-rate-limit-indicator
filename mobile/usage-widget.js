@@ -90,12 +90,16 @@ function resetLabel(resetsAt) {
 function addBar(container, percent, width) {
   const track = container.addStack();
   track.size = new Size(width, 4);
+  track.layoutHorizontally();
   track.cornerRadius = 2;
   track.backgroundColor = TRACK;
   const fill = track.addStack();
   fill.size = new Size(Math.max(2, (width * Math.min(percent, 100)) / 100), 4);
   fill.cornerRadius = 2;
   fill.backgroundColor = colorFor(percent);
+  // A stack centres its children, which left a 4% bar floating in the middle
+  // of its own track. The trailing spacer is what pins the fill to the left.
+  track.addSpacer();
 }
 
 function addWindowRow(container, provider, window, options) {
@@ -107,6 +111,9 @@ function addWindowRow(container, provider, window, options) {
   name.font = Font.mediumSystemFont(11);
   name.textColor = options.dim ? INK_3 : INK_2;
   name.lineLimit = 1;
+  // "Claude/GPT 5H" does not fit a medium column at full size, and truncating
+  // it leaves two rows that only the reset time tells apart.
+  name.minimumScaleFactor = 0.7;
 
   row.addSpacer();
 
@@ -138,6 +145,43 @@ function addWindowRow(container, provider, window, options) {
 
 const MISSING_WINDOW = { used_percent: 0, resets_at: null, label: "" };
 
+function addBlock(container, cell, options) {
+  const box = container.addStack();
+  box.layoutVertically();
+  box.size = new Size(options.width, options.height);
+
+  const top = box.addStack();
+  top.layoutHorizontally();
+  top.centerAlignContent();
+  const name = top.addText(cell.label);
+  name.font = Font.semiboldSystemFont(11);
+  name.textColor = options.dim ? INK_3 : INK_2;
+  name.lineLimit = 1;
+  name.minimumScaleFactor = 0.7;
+  top.addSpacer();
+
+  const value = top.addText(`${options.stale ? "~" : ""}${cell.window.used_percent}%`);
+  value.font = Font.boldSystemFont(16);
+  value.textColor = options.dim ? INK_3 : colorFor(cell.window.used_percent);
+
+  if (cell.secondary) {
+    top.addSpacer(4);
+    const tail = top.addText(`${cell.secondary.used_percent}%`);
+    tail.font = Font.semiboldSystemFont(10);
+    tail.textColor = options.dim ? INK_3 : colorFor(cell.secondary.used_percent);
+  }
+
+  box.addSpacer(5);
+  addBar(box, cell.window.used_percent, options.width);
+  box.addSpacer(4);
+
+  const detail = box.addText(cell.detail);
+  detail.font = Font.systemFont(9);
+  detail.textColor = INK_3;
+  detail.lineLimit = 1;
+  detail.minimumScaleFactor = 0.7;
+}
+
 function qualify(provider, window) {
   // A bare cadence like "5H" needs the provider's name to mean anything.
   // Anything else already names itself: Gemini sends "Gemini 5H" and
@@ -148,18 +192,62 @@ function qualify(provider, window) {
   return window.label;
 }
 
-function mediumRows(payload) {
-  const rows = [];
-  for (const provider of payload.providers) {
-    if (provider.windows.length === 0) {
-      rows.push({ provider, window: MISSING_WINDOW, label: provider.label });
-      continue;
+// Providers whose own name is not what the CLI is called.
+const CELL_LABELS = { gemini: "Antigravity" };
+
+function tightest(windows) {
+  // Most used wins; a tie goes to whichever resets first, and a tie there
+  // keeps the order the backend sent. The backend lists Antigravity's Gemini
+  // group before Claude/GPT, so an all-zero account shows Gemini.
+  return windows.reduce((best, window) => {
+    if (window.used_percent !== best.used_percent) {
+      return window.used_percent > best.used_percent ? window : best;
     }
-    for (const window of provider.windows) {
-      rows.push({ provider, window, label: qualify(provider, window) });
+    const a = window.resets_at || Infinity;
+    const b = best.resets_at || Infinity;
+    return a < b ? window : best;
+  }, windows[0]);
+}
+
+function mediumCells(payload) {
+  return payload.providers.map((provider) => {
+    const label = CELL_LABELS[provider.provider] || provider.label;
+    const windows = provider.windows;
+    if (windows.length === 0) {
+      return { provider, label, window: MISSING_WINDOW, detail: "no data" };
     }
-  }
-  return rows;
+    if (windows.length === 1) {
+      return {
+        provider,
+        label,
+        window: windows[0],
+        detail: `${windows[0].label} · ${resetLabel(windows[0].resets_at)}`,
+      };
+    }
+    if (windows.length === 2) {
+      // A provider with exactly a session and a weekly window shows both, the
+      // way Claude does: the bar tracks the first, the second rides along.
+      return {
+        provider,
+        label,
+        window: windows[0],
+        secondary: windows[1],
+        detail: windows
+          .map((w) => `${w.label} ${resetLabel(w.resets_at)}`)
+          .join(" · "),
+      };
+    }
+    // Antigravity sends four: Gemini and Claude/GPT, each with a session and a
+    // weekly window. One cell cannot hold four, so it holds whichever is
+    // closest to running out, and names which one that is.
+    const window = tightest(windows);
+    return {
+      provider,
+      label,
+      window,
+      detail: `${window.label} · ${resetLabel(window.resets_at)}`,
+    };
+  });
 }
 
 function smallRows(payload) {
@@ -216,7 +304,7 @@ function buildWidget(state, family) {
   }
 
   const medium = family === "medium" || family === "large";
-  const barWidth = medium ? 140 : 132;
+  const barWidth = medium ? 146 : 132;
   const age = state.fetchedAt ? Date.now() - state.fetchedAt : null;
   const offline = !state.reachable;
   const oldData = age !== null && age > STALE_AFTER_MS;
@@ -235,38 +323,46 @@ function buildWidget(state, family) {
   }
   widget.addSpacer(8);
 
-  const rows = medium ? mediumRows(state.payload) : smallRows(state.payload);
-  // Medium is twice as wide as small but exactly as tall, so the extra room is
-  // a second column, not more rows. Four rows per column is the ceiling.
-  const columns = medium ? 2 : 1;
-  const perColumn = Math.max(1, Math.ceil(rows.length / columns));
-  const gap = perColumn > 3 ? 4 : 6;
+  const firstError = (state.payload.providers.find((p) => p.error) || {});
 
-  const firstError = (rows.find((row) => row.provider.error) || {}).provider;
-
-  const body = widget.addStack();
-  body.layoutHorizontally();
-  for (let column = 0; column < columns; column += 1) {
-    const slice = rows.slice(column * perColumn, (column + 1) * perColumn);
-    if (slice.length === 0) break;
-    if (column > 0) body.addSpacer(14);
-    const lane = body.addStack();
-    lane.layoutVertically();
-    for (const row of slice) {
-      addWindowRow(lane, row.provider, row.window, {
+  if (medium) {
+    // Medium is twice as wide as small but exactly as tall, so the extra room
+    // buys a second column of blocks, not more rows. Two by two, one provider
+    // per block, each with room for a real number and its reset.
+    const cells = mediumCells(state.payload);
+    const cellWidth = (312 - 12) / 2;
+    for (let start = 0; start < cells.length; start += 2) {
+      if (start > 0) widget.addSpacer(9);
+      const band = widget.addStack();
+      band.layoutHorizontally();
+      for (const [index, cell] of cells.slice(start, start + 2).entries()) {
+        if (index > 0) band.addSpacer(12);
+        addBlock(band, cell, {
+          width: cellWidth,
+          height: 50,
+          stale: cell.provider.status !== "fresh" || oldData,
+          dim: offline,
+        });
+      }
+    }
+  } else {
+    const rows = smallRows(state.payload);
+    const gap = rows.length > 3 ? 4 : 6;
+    for (const row of rows) {
+      addWindowRow(widget, row.provider, row.window, {
         label: row.label,
         extras: row.extras,
         stale: row.provider.status !== "fresh" || oldData,
         dim: offline,
-        showReset: medium,
+        showReset: false,
         barWidth,
         gap,
       });
     }
   }
 
-  if (firstError && medium) {
-    widget.addSpacer(1);
+  if (firstError.error && medium) {
+    widget.addSpacer(2);
     const note = widget.addText(`${firstError.label}: ${firstError.error}`);
     note.font = Font.systemFont(9);
     note.textColor = AMBER;

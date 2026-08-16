@@ -35,10 +35,7 @@ function flatten(nodes, out = []) {
 
 globalThis.Color = function (hex, alpha) { return { hex, alpha }; };
 globalThis.Color.dynamic = (a, b) => ({ light: a, dark: b });
-globalThis.Font = {
-  systemFont: (n) => ({ n }), boldSystemFont: (n) => ({ n }),
-  mediumSystemFont: (n) => ({ n }),
-};
+globalThis.Font = new Proxy({}, { get: () => (n) => ({ n }) });
 globalThis.Size = function (w, h) { return { w, h }; };
 globalThis.ListWidget = ListWidget;
 
