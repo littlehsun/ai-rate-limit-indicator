@@ -7,7 +7,11 @@
 // Setup: set ENDPOINT to your publisher, run once in Scriptable to check it,
 // then add a Scriptable widget to the home screen and pick this script.
 
-const ENDPOINT = "http://127.0.0.1:8477/usage.json";
+// Where publish.py is serving. Put your own address here, or leave it and set
+// the URL as the widget parameter instead — this file lives in a public repo,
+// so it must not carry anyone's actual host.
+const DEFAULT_ENDPOINT = "http://127.0.0.1:8477/usage.json";
+const ENDPOINT = (args.widgetParameter || "").trim() || DEFAULT_ENDPOINT;
 
 // Rows for the small widget, in order. Four rows is what fits, so a provider
 // that needs two windows either spends two of them or sets `combine`.
