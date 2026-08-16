@@ -260,6 +260,16 @@ re-run cannot tell how long it has been sitting there. Tapping the widget with
 If the publisher is unreachable the widget keeps the last snapshot it fetched
 and marks it, rather than blanking.
 
+Gemini updates roughly an order of magnitude less often than the others, by
+design. Antigravity only serves quota while it runs, and `AGY_AUTO_START`
+starts it only once the cached snapshot has gone stale at ten minutes, so
+spawning a process cannot be worth numbers already in hand. Expect Gemini's
+figures to trail the rest by up to that long; it is not stuck.
+
+Antigravity also drops a window once its quota is spent — the bucket comes back
+marked `disabled` and is skipped — so a provider's window count can change
+between refreshes. Every widget size handles that.
+
 ### Before serving on a shared tailnet
 
 Anything on the tailnet that can route to the publishing machine can read the
