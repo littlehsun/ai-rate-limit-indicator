@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const SOURCE = new URL("./usage-widget.js", import.meta.url).pathname;
+const SOURCE = "/Users/hsun/Hsun/rate-limit-indicator/mobile/usage-widget.js";
 const SNAPSHOT = path.join(os.homedir(), ".cache/rate-limit-indicator/snapshots.json");
 
 class Stack {
@@ -15,6 +15,7 @@ class Stack {
   addSpacer() {}
   addStack() { const s = new Stack(this.sink); this.sink.push({ type: "stack", node: s }); return s; }
   addText(t) { const n = { type: "text", text: t }; this.sink.push(n); return n; }
+  addImage() { this.sink.push({ type: "text", text: "[wifi.slash]" }); return {}; }
 }
 
 class ListWidget {
@@ -38,6 +39,8 @@ globalThis.Color.dynamic = (a, b) => ({ light: a, dark: b });
 globalThis.Font = new Proxy({}, { get: () => (n) => ({ n }) });
 globalThis.Size = function (w, h) { return { w, h }; };
 globalThis.ListWidget = ListWidget;
+globalThis.args = { widgetParameter: null };
+globalThis.SFSymbol = { named: () => ({ applyFont() {}, image: { sym: true } }) };
 globalThis.Rect = function (x, y, w, h) { return { x, y, w, h }; };
 globalThis.Point = function (x, y) { return { x, y }; };
 globalThis.Path = class { addLines() {} };

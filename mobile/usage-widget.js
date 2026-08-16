@@ -470,6 +470,21 @@ function buildAccessory(state, family) {
   return widget;
 }
 
+function addOfflineMark(container) {
+  try {
+    const symbol = SFSymbol.named("wifi.slash");
+    symbol.applyFont(Font.systemFont(9));
+    const mark = container.addImage(symbol.image);
+    mark.imageSize = new Size(12, 9);
+    mark.tintColor = AMBER;
+  } catch (_) {
+    // Older iOS may not carry the symbol; the widget must not fail over a glyph.
+    const mark = container.addText("!");
+    mark.font = Font.boldSystemFont(9);
+    mark.textColor = AMBER;
+  }
+}
+
 function buildWidget(state, family) {
   const widget = new ListWidget();
   widget.setPadding(12, 13, 12, 13);
@@ -507,6 +522,12 @@ function buildWidget(state, family) {
   title.textColor = INK;
   header.addSpacer();
   const stamp = snapshotTime(state.payload);
+  if (offline) {
+    // The clock alone cannot say why it stopped moving, so mark the reason:
+    // these numbers are the last ones fetched, not the current ones.
+    addOfflineMark(header);
+    header.addSpacer(3);
+  }
   if (stamp || offline) {
     const badge = header.addText(stamp ? clockLabel(stamp) : "offline");
     badge.font = Font.systemFont(9);
