@@ -40,6 +40,8 @@ globalThis.Font = new Proxy({}, { get: () => (n) => ({ n }) });
 globalThis.Size = function (w, h) { return { w, h }; };
 globalThis.ListWidget = ListWidget;
 globalThis.args = { widgetParameter: null };
+globalThis.__attempts = 0;
+globalThis.Timer = { schedule: (ms, r, cb) => cb() };  // no real waiting in tests
 globalThis.__sym = null;
 globalThis.SFSymbol = { named: (n) => { globalThis.__sym = n; return { applyFont() {}, image: { sym: n } }; } };
 globalThis.Rect = function (x, y, w, h) { return { x, y, w, h }; };
@@ -54,6 +56,7 @@ const payload = JSON.parse(fs.readFileSync(SNAPSHOT, "utf8"));
 globalThis.Request = class {
   constructor(url) { this.url = url; }
   async loadJSON() {
+    globalThis.__attempts += 1;
     if (globalThis.__FAIL_FETCH) throw new Error("unreachable");
     return payload;
   }
@@ -109,6 +112,10 @@ for (const fam of ["accessoryCircular", "accessoryRectangular"]) {
   console.log(`=== ${fam}（連不上）===`);
   for (const line of await render(fam, { fail: true, cached: true, cacheAge: Date.now() - 3*3600*1000 })) console.log("  " + line);
 }
+
+globalThis.__attempts = 0;
+await render("small", { fail: true, cached: true });
+console.log(`\n=== retry 次數（連不上時）: ${globalThis.__attempts}（應為 3）===`);
 
 console.log("\n=== 行數檢查 ===");
 // A row starts with its label; percentages and reset times trail it.

@@ -49,6 +49,12 @@ const REFRESH_AFTER_MS = 5 * 60 * 1000;
 // because the publisher can only report what it knew before it went to sleep.
 // Three missed refreshes is late enough to mean something actually went wrong.
 const STALE_AFTER_MS = 15 * 60 * 1000;
+
+// A publisher on a laptop can be mid-wake when the widget asks, so one refused
+// connection is not proof it is down. Three tries, ten seconds apart.
+const FETCH_ATTEMPTS = 3;
+const RETRY_DELAY_MS = 10 * 1000;
+const FETCH_TIMEOUT_S = 8;
 const CACHE_NAME = "rate-limit-usage.json";
 
 function colorFor(percent) {
@@ -67,14 +73,36 @@ const cachePath = () => {
   return fm.joinPath(fm.cacheDirectory(), CACHE_NAME);
 };
 
+function sleep(milliseconds) {
+  return new Promise((resolve) => Timer.schedule(milliseconds, false, resolve));
+}
+
+async function fetchOnce() {
+  const request = new Request(ENDPOINT);
+  request.timeoutInterval = FETCH_TIMEOUT_S;
+  const payload = await request.loadJSON();
+  if (!payload || !Array.isArray(payload.providers)) throw new Error("bad payload");
+  return payload;
+}
+
 async function loadPayload() {
   const fm = FileManager.local();
   const path = cachePath();
+  // iOS kills a widget render long before three attempts ten seconds apart can
+  // finish, and a killed render simply leaves the previous tile in place — so
+  // the wait shrinks there. Tapping the script has no such ceiling.
+  const delay = config.runsInWidget ? 2000 : RETRY_DELAY_MS;
   try {
-    const request = new Request(ENDPOINT);
-    request.timeoutInterval = 10;
-    const payload = await request.loadJSON();
-    if (!payload || !Array.isArray(payload.providers)) throw new Error("bad payload");
+    let payload = null;
+    for (let attempt = 1; attempt <= FETCH_ATTEMPTS; attempt += 1) {
+      try {
+        payload = await fetchOnce();
+        break;
+      } catch (error) {
+        if (attempt === FETCH_ATTEMPTS) throw error;
+        await sleep(delay);
+      }
+    }
     fm.writeString(path, JSON.stringify({ fetchedAt: Date.now(), payload }));
     return { payload, fetchedAt: Date.now(), reachable: true };
   } catch (error) {
