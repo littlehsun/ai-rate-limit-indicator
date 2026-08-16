@@ -28,9 +28,14 @@ const RED = new Color("#FF5454");
 const AMBER = new Color("#FFB82E");
 const GREEN = new Color("#00B04F");
 
+// How soon to ask iOS to run this again. See the note at refreshAfterDate:
+// iOS decides the real cadence, so treat this as the floor, not the interval.
+const REFRESH_AFTER_MS = 5 * 60 * 1000;
+
 // A snapshot older than this is called out even if the publisher claims fresh,
 // because the publisher can only report what it knew before it went to sleep.
-const STALE_AFTER_MS = 20 * 60 * 1000;
+// Three missed refreshes is late enough to mean something actually went wrong.
+const STALE_AFTER_MS = 15 * 60 * 1000;
 const CACHE_NAME = "rate-limit-usage.json";
 
 function colorFor(percent) {
@@ -324,7 +329,11 @@ function buildWidget(state, family) {
   const widget = new ListWidget();
   widget.setPadding(12, 13, 12, 13);
   widget.backgroundColor = Color.dynamic(new Color("#FFFFFF"), new Color("#1C1C1E"));
-  widget.refreshAfterDate = new Date(Date.now() + 15 * 60 * 1000);
+  // iOS treats this as a hint, not a schedule: widgets share a daily refresh
+  // budget, and asking every 5 minutes is far more than it will grant. Asking
+  // anyway means it refreshes as soon as the budget allows instead of waiting
+  // out a longer interval we made up.
+  widget.refreshAfterDate = new Date(Date.now() + REFRESH_AFTER_MS);
   widget.url = ENDPOINT;
 
   if (!state.payload) {
@@ -410,11 +419,21 @@ function buildWidget(state, family) {
   return widget;
 }
 
+// Tapping play in Scriptable reports no widget family, so pick one. Large
+// shows every window, which is what you want when checking a change; set it to
+// "small" or "medium" to preview those instead. Widgets ignore this entirely.
+const PREVIEW_FAMILY = "large";
+
 const state = await loadPayload();
-const widget = buildWidget(state, config.widgetFamily || "medium");
+const family = config.widgetFamily || PREVIEW_FAMILY;
+const widget = buildWidget(state, family);
 
 if (config.runsInWidget) {
   Script.setWidget(widget);
+} else if (family === "small") {
+  await widget.presentSmall();
+} else if (family === "large") {
+  await widget.presentLarge();
 } else {
   await widget.presentMedium();
 }
