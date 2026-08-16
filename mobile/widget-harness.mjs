@@ -76,14 +76,15 @@ globalThis.Script = { setWidget: (w) => { captured = w; }, complete: () => {} };
 
 const source = fs.readFileSync(SOURCE, "utf8");
 
-async function render(family, { fail = false, cached = false, cacheAge = Date.now() } = {}) {
+async function render(family, opts = {}) {
+  const { fail = false, cached = false, cacheAge = Date.now() } = opts;
   globalThis.__FAIL_FETCH = fail;
   globalThis.__CACHED = cached;
   globalThis.__CACHE_AGE = cacheAge;
-  globalThis.config = { widgetFamily: family, runsInWidget: true };
+  globalThis.config = { widgetFamily: family, runsInWidget: !opts.interactive };
   captured = null;
   const module = `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
-  await import(`${module}#${family}-${fail}-${cached}-${cacheAge}`);
+  await import(`${module}#${family}-${fail}-${cached}-${cacheAge}-${!!opts.interactive}`);
   return flatten(captured.nodes);
 }
 
@@ -115,7 +116,10 @@ for (const fam of ["accessoryCircular", "accessoryRectangular"]) {
 
 globalThis.__attempts = 0;
 await render("small", { fail: true, cached: true });
-console.log(`\n=== retry 次數（連不上時）: ${globalThis.__attempts}（應為 3）===`);
+const inWidget = globalThis.__attempts;
+globalThis.__attempts = 0;
+await render("small", { fail: true, cached: true, interactive: true });
+console.log(`\n=== retry 次數：widget ${inWidget}（應為 1）／互動 ${globalThis.__attempts}（應為 3）===`);
 
 console.log("\n=== 行數檢查 ===");
 // A row starts with its label; percentages and reset times trail it.
