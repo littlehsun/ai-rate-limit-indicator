@@ -24,11 +24,13 @@ class ListWidget {
   addSpacer() {}
   addStack() { const s = new Stack(this.nodes); this.nodes.push({ type: "stack", node: s }); return s; }
   addText(t) { const n = { type: "text", text: t }; this.nodes.push(n); return n; }
-  async presentSmall() {}
-  async presentMedium() {}
-  async presentLarge() {}
-  async presentAccessoryCircular() {}
-  async presentAccessoryRectangular() {}
+  // An interactive run presents instead of calling Script.setWidget, so the
+  // harness has to capture the widget from whichever path the script took.
+  async presentSmall() { globalThis.__presented = this; }
+  async presentMedium() { globalThis.__presented = this; }
+  async presentLarge() { globalThis.__presented = this; }
+  async presentAccessoryCircular() { globalThis.__presented = this; }
+  async presentAccessoryRectangular() { globalThis.__presented = this; }
 }
 
 function flatten(nodes, out = []) {
@@ -87,9 +89,10 @@ async function render(family, opts = {}) {
   globalThis.__CACHE_AGE = cacheAge;
   globalThis.config = { widgetFamily: family, runsInWidget: !opts.interactive };
   captured = null;
+  globalThis.__presented = null;
   const module = `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
   await import(`${module}#${family}-${fail}-${cached}-${cacheAge}-${!!opts.interactive}`);
-  return flatten(captured.nodes);
+  return flatten((captured || globalThis.__presented).nodes);
 }
 
 const rows = (lines) => lines.slice(1);
@@ -127,7 +130,17 @@ console.log(`\n=== retry 次數：widget ${inWidget}（應為 1）／互動 ${gl
 
 console.log("\n=== 行數檢查 ===");
 // A row starts with its label; percentages and reset times trail it.
-const countRows = (lines) => lines.filter((t) => !/%$/.test(t) && !/^\d+[hdm]/.test(t)).length;
+// A row is its label. Percentages, durations, reset lines and the header
+// clock all trail or decorate one, so none of them count as a row.
+const countRows = (lines) =>
+  lines.filter(
+    (t) =>
+      !/%$/.test(t) &&
+      !/^\d+[hdm]/.test(t) &&
+      !/^\d{1,2}:\d{2}$/.test(t) &&
+      !/^(reset |5H |7D )/.test(t) &&
+      !t.includes(" · "),
+  ).length;
 const small = countRows(rows(await render("small")));
 console.log(`  small 行數: ${small}  ${small <= 4 ? "✓ 放得下" : "✗ 會超出高度"}`);
 const medium = countRows(rows(await render("medium")));
