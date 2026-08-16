@@ -145,6 +145,9 @@ function addWindowRow(container, provider, window, options) {
 
 // Providers whose own name is not what the CLI is called.
 const CELL_LABELS = { gemini: "Antigravity" };
+// Large lists every window, where "Claude/GPT 5H" sitting next to
+// "Claude 5H" needs saying which one belongs to Antigravity.
+const SHORT_LABELS = { gemini: "AGY" };
 
 function cellLabel(provider) {
   return CELL_LABELS[provider.provider] || provider.label;
@@ -211,6 +214,34 @@ function tightest(windows) {
     const b = best.resets_at || Infinity;
     return a < b ? window : best;
   }, windows[0]);
+}
+
+function largeCells(payload) {
+  // Large is 2.24x the height of medium, which is exactly enough for one block
+  // per window. Nothing has to be chosen or hidden here.
+  const cells = [];
+  for (const provider of payload.providers) {
+    const short = SHORT_LABELS[provider.provider];
+    if (provider.windows.length === 0) {
+      cells.push({
+        provider,
+        label: cellLabel(provider),
+        window: MISSING_WINDOW,
+        detail: "no data",
+      });
+      continue;
+    }
+    for (const window of provider.windows) {
+      const named = qualify(provider, window);
+      cells.push({
+        provider,
+        label: short ? `${short} ${named}` : named,
+        window,
+        detail: `reset ${resetLabel(window.resets_at)}`,
+      });
+    }
+  }
+  return cells;
 }
 
 function mediumCells(payload) {
@@ -307,7 +338,8 @@ function buildWidget(state, family) {
     return widget;
   }
 
-  const medium = family === "medium" || family === "large";
+  const large = family === "large";
+  const medium = family === "medium" || large;
   const barWidth = medium ? 146 : 132;
   const age = state.fetchedAt ? Date.now() - state.fetchedAt : null;
   const offline = !state.reachable;
@@ -333,22 +365,24 @@ function buildWidget(state, family) {
     // Medium is twice as wide as small but exactly as tall, so the extra room
     // buys a second column of blocks, not more rows. Two by two, one provider
     // per block, each with room for a real number and its reset.
-    const cells = mediumCells(state.payload);
+    const cells = large ? largeCells(state.payload) : mediumCells(state.payload);
     const cellWidth = (312 - 12) / 2;
     for (let start = 0; start < cells.length; start += 2) {
-      if (start > 0) widget.addSpacer(9);
+      if (start > 0) widget.addSpacer(large ? 12 : 9);
       const band = widget.addStack();
       band.layoutHorizontally();
       for (const [index, cell] of cells.slice(start, start + 2).entries()) {
         if (index > 0) band.addSpacer(12);
         addBlock(band, cell, {
           width: cellWidth,
-          height: 50,
+          height: large ? 62 : 50,
           stale: cell.provider.status !== "fresh" || oldData,
           dim: offline,
         });
       }
     }
+    // Without this the blocks float in the middle of a large widget.
+    if (large) widget.addSpacer();
   } else {
     const rows = smallRows(state.payload);
     const gap = rows.length > 3 ? 4 : 6;
