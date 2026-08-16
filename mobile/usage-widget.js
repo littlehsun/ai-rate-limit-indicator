@@ -457,13 +457,15 @@ function buildAccessory(state, family) {
     const line = widget.addStack();
     line.layoutHorizontally();
     line.centerAlignContent();
+    // No minimumScaleFactor here. Letting long names shrink meant "Antigravity"
+    // rendered smaller than "Grok", so the four rows disagreed about type size.
+    // 172pt fits every provider name at 11pt, so truncation never comes up.
     const name = line.addText(row.label);
     name.font = Font.systemFont(11);
     name.lineLimit = 1;
-    name.minimumScaleFactor = 0.6;
     line.addSpacer();
     const value = line.addText(`${row.window.used_percent}%`);
-    value.font = Font.boldSystemFont(11);
+    value.font = Font.semiboldSystemFont(11);
   }
   return widget;
 }
