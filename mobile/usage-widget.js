@@ -88,19 +88,20 @@ async function fetchOnce() {
 async function loadPayload() {
   const fm = FileManager.local();
   const path = cachePath();
-  // iOS kills a widget render long before three attempts ten seconds apart can
-  // finish, and a killed render simply leaves the previous tile in place — so
-  // the wait shrinks there. Tapping the script has no such ceiling.
-  const delay = config.runsInWidget ? 2000 : RETRY_DELAY_MS;
+  // Retrying is for a tap, where waiting costs nothing but time. A widget
+  // render that retries spends its whole budget failing and gets killed, which
+  // leaves the stale tile in place and never draws the offline mark — the
+  // opposite of what the retry was for. One attempt there, then the cache.
+  const attempts = config.runsInWidget ? 1 : FETCH_ATTEMPTS;
   try {
     let payload = null;
-    for (let attempt = 1; attempt <= FETCH_ATTEMPTS; attempt += 1) {
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
       try {
         payload = await fetchOnce();
         break;
       } catch (error) {
-        if (attempt === FETCH_ATTEMPTS) throw error;
-        await sleep(delay);
+        if (attempt === attempts) throw error;
+        await sleep(RETRY_DELAY_MS);
       }
     }
     fm.writeString(path, JSON.stringify({ fetchedAt: Date.now(), payload }));
