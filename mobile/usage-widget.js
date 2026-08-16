@@ -23,6 +23,15 @@ const SMALL_ROWS = [
   { provider: "gemini" },
 ];
 
+// Tapping play in Scriptable reports no widget family, so pick one. Large
+// shows every window, which is what you want when checking a change; set it to
+// "small" or "medium" to preview those instead. Widgets ignore this entirely.
+const PREVIEW_FAMILY = "large";
+
+// The circular Lock Screen widget tracks whichever provider is closest to
+// running out. Set this to "codex", "claude", "grok" or "gemini" to pin it.
+const CIRCULAR_PROVIDER = "worst";
+
 // Matches UsageColor in the macOS app so both surfaces agree on "bad".
 const RED = new Color("#FF5454");
 const AMBER = new Color("#FFB82E");
@@ -169,6 +178,13 @@ const CELL_LABELS = { gemini: "Antigravity" };
 // Large lists every window, where "Claude/GPT 5H" sitting next to
 // "Claude 5H" needs saying which one belongs to Antigravity.
 const SHORT_LABELS = { gemini: "AGY" };
+// A circular Lock Screen widget has room for a number and about three
+// characters, so "Antigravity" cannot simply be truncated to "Antigr".
+const CODES = { codex: "CDX", claude: "CLD", grok: "GRK", gemini: "AGY" };
+
+function providerCode(provider) {
+  return CODES[provider.provider] || provider.label.slice(0, 3).toUpperCase();
+}
 
 function cellLabel(provider) {
   return CELL_LABELS[provider.provider] || provider.label;
@@ -384,7 +400,7 @@ function accessoryRows(payload) {
       ? wanted.windows.map((id) => provider.windows.find((w) => w.id === id)).filter(Boolean)
       : provider.windows.slice(0, 1);
     const window = windows.length ? tightest(windows) : provider.windows[0];
-    return { label: cellLabel(provider), window };
+    return { provider, label: cellLabel(provider), window };
   }).filter(Boolean);
 }
 
@@ -402,8 +418,12 @@ function buildAccessory(state, family) {
   const rows = accessoryRows(state.payload);
 
   if (family === "accessoryCircular") {
-    // One number is all a circle holds, so it holds the worst one.
-    const worst = rows.reduce((a, b) => (b.window.used_percent > a.window.used_percent ? b : a), rows[0]);
+    // One number is all a circle holds. By default it holds whichever is
+    // closest to running out; pin CIRCULAR_PROVIDER to always watch one.
+    const pinned = rows.find((row) => row.provider.provider === CIRCULAR_PROVIDER);
+    const worst =
+      pinned ||
+      rows.reduce((a, b) => (b.window.used_percent > a.window.used_percent ? b : a), rows[0]);
     const size = 58;
     const box = widget.addStack();
     box.size = new Size(size, size);
@@ -419,8 +439,8 @@ function buildAccessory(state, family) {
     const tag = box.addStack();
     tag.layoutHorizontally();
     tag.addSpacer();
-    const name = tag.addText(worst.label.slice(0, 6));
-    name.font = Font.systemFont(8);
+    const name = tag.addText(providerCode(worst.provider));
+    name.font = Font.mediumSystemFont(9);
     tag.addSpacer();
     box.addSpacer();
     return widget;
@@ -538,11 +558,6 @@ function buildWidget(state, family) {
 
   return widget;
 }
-
-// Tapping play in Scriptable reports no widget family, so pick one. Large
-// shows every window, which is what you want when checking a change; set it to
-// "small" or "medium" to preview those instead. Widgets ignore this entirely.
-const PREVIEW_FAMILY = "large";
 
 const state = await loadPayload();
 const family = config.widgetFamily || PREVIEW_FAMILY;
