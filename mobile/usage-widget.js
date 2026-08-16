@@ -470,19 +470,29 @@ function buildAccessory(state, family) {
   return widget;
 }
 
+// network.slash rather than wifi.slash: the failure is reaching the publisher,
+// which says nothing about whether Wi-Fi is on. Older iOS releases may not
+// carry it, so fall back rather than let a missing glyph break the widget.
+const OFFLINE_SYMBOLS = ["network.slash", "wifi.slash", "exclamationmark.triangle"];
+
 function addOfflineMark(container) {
-  try {
-    const symbol = SFSymbol.named("wifi.slash");
-    symbol.applyFont(Font.systemFont(9));
-    const mark = container.addImage(symbol.image);
-    mark.imageSize = new Size(12, 9);
-    mark.tintColor = AMBER;
-  } catch (_) {
-    // Older iOS may not carry the symbol; the widget must not fail over a glyph.
-    const mark = container.addText("!");
-    mark.font = Font.boldSystemFont(9);
-    mark.textColor = AMBER;
+  for (const name of OFFLINE_SYMBOLS) {
+    try {
+      const symbol = SFSymbol.named(name);
+      if (!symbol) continue;
+      symbol.applyFont(Font.systemFont(9));
+      const mark = container.addImage(symbol.image);
+      mark.imageSize = new Size(11, 10);
+      mark.tintColor = AMBER;
+      mark.resizable = true;
+      return;
+    } catch (_) {
+      // Try the next one.
+    }
   }
+  const mark = container.addText("!");
+  mark.font = Font.boldSystemFont(10);
+  mark.textColor = AMBER;
 }
 
 function buildWidget(state, family) {
