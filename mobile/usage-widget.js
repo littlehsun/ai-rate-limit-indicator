@@ -475,29 +475,10 @@ function buildAccessory(state, family) {
   return widget;
 }
 
-// network.slash rather than wifi.slash: the failure is reaching the publisher,
-// which says nothing about whether Wi-Fi is on. Older iOS releases may not
-// carry it, so fall back rather than let a missing glyph break the widget.
-const OFFLINE_SYMBOLS = ["network.slash", "wifi.slash", "exclamationmark.triangle"];
-
 function addOfflineMark(container) {
-  for (const name of OFFLINE_SYMBOLS) {
-    try {
-      const symbol = SFSymbol.named(name);
-      if (!symbol) continue;
-      symbol.applyFont(Font.systemFont(9));
-      const mark = container.addImage(symbol.image);
-      mark.imageSize = new Size(11, 10);
-      mark.tintColor = AMBER;
-      mark.resizable = true;
-      return;
-    } catch (_) {
-      // Try the next one.
-    }
-  }
-  const mark = container.addText("!");
-  mark.font = Font.boldSystemFont(10);
-  mark.textColor = AMBER;
+  const mark = container.addText("\u2715");
+  mark.font = Font.boldSystemFont(11);
+  mark.textColor = RED;
 }
 
 function buildWidget(state, family) {
@@ -567,7 +548,7 @@ function buildWidget(state, family) {
         addBlock(band, cell, {
           width: cellWidth,
           height: large ? 62 : 50,
-          stale: cell.provider.status !== "fresh" || oldData,
+          stale: cell.provider.status !== "fresh" || (oldData && !offline),
           dim: offline,
         });
       }
@@ -581,7 +562,7 @@ function buildWidget(state, family) {
       addWindowRow(widget, row.provider, row.window, {
         label: row.label,
         extras: row.extras,
-        stale: row.provider.status !== "fresh" || oldData,
+        stale: row.provider.status !== "fresh" || (oldData && !offline),
         dim: offline,
         showReset: false,
         barWidth,
