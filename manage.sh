@@ -17,6 +17,7 @@ INSTALLED_SCRIPT="$APP_DIR/manage.sh"
 BIN="$REAL_HOME/.local/bin/rate-limit-indicators"
 AUTOSTART="$REAL_HOME/.config/autostart/rate-limit-indicators.desktop"
 UNIFIED_SERVICE="rate-limit-indicator.service"
+PUBLISH_SERVICE="rate-limit-publish.service"
 UNIFIED_CLI="$REAL_HOME/.local/share/rate-limit-indicator/unified/cli.py"
 
 PROVIDER_KEYS=(CODEX CLAUDE GROK GEMINI)
@@ -140,6 +141,18 @@ apply_config() {
     else
         echo "No providers enabled; stopping unified indicator."
         systemctl --user stop "$UNIFIED_SERVICE" 2>/dev/null || true
+    systemctl --user stop "$PUBLISH_SERVICE" 2>/dev/null || true
+    fi
+
+    # The publisher serves the snapshot the indicator writes, so it follows the
+    # indicator rather than running on its own schedule.
+    if read_enabled MOBILE_PUBLISH && any_provider_enabled; then
+        echo "Starting usage publisher..."
+        systemctl --user enable --now "$PUBLISH_SERVICE" 2>/dev/null \
+            || systemctl --user restart "$PUBLISH_SERVICE" \
+            || echo "Warning: could not start $PUBLISH_SERVICE." >&2
+    else
+        systemctl --user disable --now "$PUBLISH_SERVICE" 2>/dev/null || true
     fi
 }
 
@@ -199,6 +212,11 @@ install_manager() {
         printf '\n# true opts in to running `grok models` when the Grok token has\n' >> "$CONFIG_FILE"
         printf '# expired, so the CLI refreshes its own credential.\n' >> "$CONFIG_FILE"
         printf 'GROK_AUTO_REFRESH=false\n' >> "$CONFIG_FILE"
+    fi
+    if ! has_config_assignment MOBILE_PUBLISH; then
+        printf '\n# true serves the usage snapshot on this machine Tailscale address\n' >> "$CONFIG_FILE"
+        printf '# so a phone widget can read it. Nothing off the tailnet can reach it.\n' >> "$CONFIG_FILE"
+        printf 'MOBILE_PUBLISH=false\n' >> "$CONFIG_FILE"
     fi
     if ! has_config_assignment AGY_AUTO_START; then
         printf '\n# true opts in to running `agy models` when Antigravity is not\n' >> "$CONFIG_FILE"
@@ -279,6 +297,7 @@ stop_all() {
         systemctl --user stop "$timer" 2>/dev/null || true
     done
     systemctl --user stop "$UNIFIED_SERVICE" 2>/dev/null || true
+    systemctl --user stop "$PUBLISH_SERVICE" 2>/dev/null || true
 }
 
 show_status() {
@@ -298,6 +317,11 @@ show_status() {
     done
     active="$(systemctl --user is-active "$UNIFIED_SERVICE" 2>/dev/null || true)"
     printf '\nUnified UI: %s\n' "${active:-unknown}"
+    if read_enabled MOBILE_PUBLISH; then
+        printf 'Publisher: %s\n' "$(systemctl --user is-active "$PUBLISH_SERVICE" 2>/dev/null || echo inactive)"
+    else
+        printf 'Publisher: %s\n' "disabled (MOBILE_PUBLISH)"
+    fi
 }
 
 case "${1:-}" in

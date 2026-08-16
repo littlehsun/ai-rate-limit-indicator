@@ -16,6 +16,7 @@ BIN="$REAL_HOME/.local/bin/rate-limit-indicator"
 CLI_BIN="$REAL_HOME/.local/bin/rate-limit-usage"
 SERVICE_DIR="$REAL_HOME/.config/systemd/user"
 SERVICE="$SERVICE_DIR/rate-limit-indicator.service"
+PUBLISH_SERVICE="$SERVICE_DIR/rate-limit-publish.service"
 
 if ! python3 -c "import gi; gi.require_version('AppIndicator3','0.1'); from gi.repository import AppIndicator3" 2>/dev/null; then
     echo "Missing AppIndicator3 Python bindings." >&2
@@ -67,7 +68,26 @@ Environment=PYTHONUNBUFFERED=1
 WantedBy=default.target
 EOF
 
+# Restart=on-failure covers the boot ordering: publish.py exits non-zero when
+# no Tailscale address exists yet, and systemd simply tries again.
+cat > "$PUBLISH_SERVICE" <<EOF
+[Unit]
+Description=Serve AI rate limit usage on the Tailscale network
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env python3 $APP_DIR/publish.py
+Restart=on-failure
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
+EOF
+
 systemctl --user daemon-reload 2>/dev/null || true
 echo "Unified indicator: $BIN"
 echo "Usage CLI: $CLI_BIN"
 echo "Unified service: $SERVICE"
+echo "Publisher service: $PUBLISH_SERVICE (set MOBILE_PUBLISH=true to enable)"

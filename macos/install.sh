@@ -227,6 +227,11 @@ if ! grep -Eq '^[[:space:]]*(export[[:space:]]+)?GROK_AUTO_REFRESH[[:space:]]*='
     printf '# expired, so the CLI refreshes its own credential.\n' >> "$CONFIG_FILE"
     printf 'GROK_AUTO_REFRESH=false\n' >> "$CONFIG_FILE"
 fi
+if ! grep -Eq '^[[:space:]]*(export[[:space:]]+)?MOBILE_PUBLISH[[:space:]]*=' "$CONFIG_FILE"; then
+    printf '\n# true serves the usage snapshot on this machine Tailscale address so a\n' >> "$CONFIG_FILE"
+    printf '# phone widget can read it. Nothing off the tailnet can reach it.\n' >> "$CONFIG_FILE"
+    printf 'MOBILE_PUBLISH=false\n' >> "$CONFIG_FILE"
+fi
 if ! grep -Eq '^[[:space:]]*(export[[:space:]]+)?AGY_AUTO_START[[:space:]]*=' "$CONFIG_FILE"; then
     printf '\n# true opts in to running `agy models` when Antigravity is not\n' >> "$CONFIG_FILE"
     printf '# listening, which serves Gemini quota for the few seconds it runs.\n' >> "$CONFIG_FILE"
@@ -373,6 +378,55 @@ PLIST
     launchctl bootout "gui/$UID" "$plist" 2>/dev/null || true
     launchctl bootstrap "gui/$UID" "$plist"
 done
+
+PUBLISH_PLIST="$LAUNCH_AGENTS/com.hsun.rate-limit-indicator.publish.plist"
+publish_enabled=false
+case "$(sed -n -E 's/^[[:space:]]*(export[[:space:]]+)?MOBILE_PUBLISH[[:space:]]*=[[:space:]]*([^#[:space:]]+).*$/\2/p' "$CONFIG_FILE" | tail -n 1 | tr -d "\"'" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on) publish_enabled=true ;;
+esac
+
+launchctl bootout "gui/$UID" "$PUBLISH_PLIST" 2>/dev/null || true
+if [[ "$publish_enabled" == true ]]; then
+    echo "Installing the usage publisher LaunchAgent..."
+    cat > "$PUBLISH_PLIST" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.hsun.rate-limit-indicator.publish</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>python-placeholder</string>
+    <string>publish-placeholder</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>StandardOutPath</key>
+  <string>stdout-placeholder</string>
+  <key>StandardErrorPath</key>
+  <string>stderr-placeholder</string>
+</dict>
+</plist>
+PLIST
+    # KeepAlive only on failure, throttled: publish.py exits non-zero until
+    # Tailscale is up, and an unthrottled respawn would spin during boot.
+    replace_plist_argument "$PUBLISH_PLIST" 0 "$PYTHON_BIN"
+    replace_plist_argument "$PUBLISH_PLIST" 1 "$BACKEND_DIR/publish.py"
+    /usr/bin/plutil -replace StandardOutPath -string "$LOG_DIR/publish.out.log" "$PUBLISH_PLIST"
+    /usr/bin/plutil -replace StandardErrorPath -string "$LOG_DIR/publish.err.log" "$PUBLISH_PLIST"
+    launchctl bootstrap "gui/$UID" "$PUBLISH_PLIST"
+else
+    rm -f "$PUBLISH_PLIST"
+fi
 
 echo "Preparing legacy Codex menu-bar migration..."
 if [[ "$legacy_login_was_enabled" == true ]]; then
