@@ -89,6 +89,9 @@ for (const line of await render("small", { fail: true, cached: true, cacheAge: D
 console.log("\n=== SMALL（連不上，完全沒 cache）===");
 for (const line of await render("small", { fail: true, cached: false })) console.log("  " + line);
 
+console.log("\n=== LARGE（正常）===");
+for (const line of await render("large")) console.log("  " + line);
+
 console.log("\n=== 行數檢查 ===");
 // A row starts with its label; percentages and reset times trail it.
 const countRows = (lines) => lines.filter((t) => !/%$/.test(t) && !/^\d+[hdm]/.test(t)).length;

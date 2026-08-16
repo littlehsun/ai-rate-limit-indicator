@@ -143,6 +143,13 @@ function addWindowRow(container, provider, window, options) {
   container.addSpacer(options.gap);
 }
 
+// Providers whose own name is not what the CLI is called.
+const CELL_LABELS = { gemini: "Antigravity" };
+
+function cellLabel(provider) {
+  return CELL_LABELS[provider.provider] || provider.label;
+}
+
 const MISSING_WINDOW = { used_percent: 0, resets_at: null, label: "" };
 
 function addBlock(container, cell, options) {
@@ -192,9 +199,6 @@ function qualify(provider, window) {
   return window.label;
 }
 
-// Providers whose own name is not what the CLI is called.
-const CELL_LABELS = { gemini: "Antigravity" };
-
 function tightest(windows) {
   // Most used wins; a tie goes to whichever resets first, and a tie there
   // keeps the order the backend sent. The backend lists Antigravity's Gemini
@@ -211,7 +215,7 @@ function tightest(windows) {
 
 function mediumCells(payload) {
   return payload.providers.map((provider) => {
-    const label = CELL_LABELS[provider.provider] || provider.label;
+    const label = cellLabel(provider);
     const windows = provider.windows;
     if (windows.length === 0) {
       return { provider, label, window: MISSING_WINDOW, detail: "no data" };
@@ -259,7 +263,7 @@ function smallRows(payload) {
       ? wanted.windows.map((id) => provider.windows.find((w) => w.id === id)).filter(Boolean)
       : provider.windows.slice(0, 1);
     if (windows.length === 0) {
-      rows.push({ provider, window: MISSING_WINDOW, label: provider.label });
+      rows.push({ provider, window: MISSING_WINDOW, label: cellLabel(provider) });
       continue;
     }
     if (wanted.combine) {
@@ -267,7 +271,7 @@ function smallRows(payload) {
       rows.push({
         provider,
         window: windows[0],
-        label: provider.label,
+        label: cellLabel(provider),
         extras: windows.slice(1),
       });
       continue;
@@ -278,7 +282,7 @@ function smallRows(payload) {
       rows.push({
         provider,
         window,
-        label: windows.length > 1 ? qualify(provider, window) : provider.label,
+        label: windows.length > 1 ? qualify(provider, window) : cellLabel(provider),
       });
     }
   }
