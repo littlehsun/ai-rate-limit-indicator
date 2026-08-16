@@ -24,7 +24,11 @@ class ListWidget {
   addSpacer() {}
   addStack() { const s = new Stack(this.nodes); this.nodes.push({ type: "stack", node: s }); return s; }
   addText(t) { const n = { type: "text", text: t }; this.nodes.push(n); return n; }
+  async presentSmall() {}
   async presentMedium() {}
+  async presentLarge() {}
+  async presentAccessoryCircular() {}
+  async presentAccessoryRectangular() {}
 }
 
 function flatten(nodes, out = []) {
