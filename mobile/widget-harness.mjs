@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const SOURCE = "/Users/hsun/Hsun/rate-limit-indicator/mobile/usage-widget.js";
+const SOURCE = new URL("./usage-widget.js", import.meta.url).pathname;
 const SNAPSHOT = path.join(os.homedir(), ".cache/rate-limit-indicator/snapshots.json");
 
 class Stack {
