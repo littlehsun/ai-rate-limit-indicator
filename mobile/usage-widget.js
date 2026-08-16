@@ -522,7 +522,7 @@ function buildWidget(state, family) {
   widget.url = ENDPOINT;
 
   if (!state.payload) {
-    const title = widget.addText("Rate Limits");
+    const title = widget.addText("Usage");
     title.font = Font.boldSystemFont(13);
     title.textColor = INK;
     widget.addSpacer(6);
@@ -542,7 +542,7 @@ function buildWidget(state, family) {
   const header = widget.addStack();
   header.layoutHorizontally();
   header.centerAlignContent();
-  const title = header.addText("Rate Limits");
+  const title = header.addText("Usage");
   title.font = Font.boldSystemFont(12);
   title.textColor = INK;
   header.addSpacer();
