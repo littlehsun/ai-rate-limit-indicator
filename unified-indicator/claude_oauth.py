@@ -14,10 +14,16 @@ from typing import Any, Callable, Iterator, Mapping, Optional
 
 
 USAGE_ENDPOINT = "https://api.anthropic.com/api/oauth/usage"
+TOKEN_ENDPOINT = "https://api.anthropic.com/v1/oauth/token"
+# Claude Code's own OAuth client. A refresh minted under a different client id
+# is rejected, so this has to match the CLI that owns the credential.
+CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 BETA_HEADER = "oauth-2025-04-20"
 USER_AGENT = "claude-code/2.1.0"
 KEYCHAIN_SERVICE = "Claude Code-credentials"
 KEYCHAIN_TIMEOUT = 10.0
+REFRESH_COOLDOWN = 300.0
+REFRESH_TIMEOUT = 30.0
 
 
 class ClaudeOAuthUnavailable(RuntimeError):
@@ -213,6 +219,200 @@ def _parse_credentials(raw: str, now_ms: int) -> ClaudeOAuthCredentials:
     )
 
 
+def default_refresh_stamp_path() -> Path:
+    return Path(
+        os.environ.get(
+            "CLAUDE_REFRESH_STAMP",
+            Path.home() / ".cache" / "rate-limit-indicator" / "claude-refresh-attempt",
+        )
+    )
+
+
+def refresh_is_in_cooldown(
+    stamp_path: Optional[Path] = None,
+    *,
+    now: Optional[float] = None,
+) -> bool:
+    """Report whether the last refresh is recent enough to skip this one."""
+
+    path = stamp_path or default_refresh_stamp_path()
+    now = time.time() if now is None else now
+    try:
+        last_attempt = float(path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return False
+    # A clock that jumped backwards must not lock refreshing out until it
+    # catches up, so a negative age counts as no cooldown at all.
+    return 0.0 <= now - last_attempt < REFRESH_COOLDOWN
+
+
+def record_refresh_attempt(
+    stamp_path: Optional[Path] = None,
+    *,
+    now: Optional[float] = None,
+) -> None:
+    path = stamp_path or default_refresh_stamp_path()
+    now = time.time() if now is None else now
+    try:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        path.write_text(f"{now}\n", encoding="utf-8")
+    except OSError:
+        # Losing the stamp costs us the cooldown, not the refresh.
+        pass
+
+
+def refresh_credentials(
+    path: Optional[Path] = None,
+    *,
+    opener: Optional[
+        Callable[[urllib.request.Request, float], Mapping[str, Any]]
+    ] = None,
+    stamp_path: Optional[Path] = None,
+    now: Optional[float] = None,
+    enabled: Optional[bool] = None,
+) -> Optional[ClaudeOAuthCredentials]:
+    """Exchange the stored refresh token for a live access token.
+
+    Claude Code only refreshes while it runs, so an idle machine wakes up with
+    an expired token and nothing to fix it. The refresh itself is one POST, and
+    Claude Code reads the credential back off disk before every refresh of its
+    own, so writing the new pair back is enough to keep it working.
+
+    Two rules make that safe to do underneath a running Claude Code:
+
+    * The refresh token rotates. Whoever spends it first invalidates the other
+      copy, so the write is a compare-and-swap -- re-read the file and only
+      replace the entry that still holds the token we spent. Claude Code writes
+      the same way.
+    * A refresh that fails must change nothing. Claude Code answers a dead
+      refresh token by blanking accessToken and refreshToken on disk, which
+      costs the user a full `claude auth login`. We never do that: a failure
+      here leaves the file exactly as it was and the caller reports an expired
+      token, which is the state we were already in.
+    """
+
+    # The indicator is started from a desktop autostart entry, which never
+    # sources providers.env, so the caller reads the flag from that file and
+    # passes it in. The environment is the fallback for direct invocations.
+    if enabled is None:
+        enabled = _flag_enabled(os.environ.get("CLAUDE_AUTO_REFRESH"))
+    if not enabled:
+        return None
+    # macOS keeps this credential in the Keychain, where none of the file
+    # handling below applies.
+    if sys.platform == "darwin" and path is None:
+        return None
+
+    credentials_path = path or default_credentials_path()
+    try:
+        payload = json.loads(credentials_path.read_text(encoding="utf-8"))
+        oauth = payload["claudeAiOauth"]
+        spent_token = str(oauth["refreshToken"] or "").strip()
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+    if not spent_token:
+        return None
+
+    now = time.time() if now is None else now
+    stamp = stamp_path or default_refresh_stamp_path()
+    # The poller fires every 60s. Without a cooldown, a refresh that keeps
+    # failing earns a request every tick for as long as it stays broken.
+    # Stamping before the request means a hang still counts as an attempt.
+    if refresh_is_in_cooldown(stamp, now=now):
+        return None
+    record_refresh_attempt(stamp, now=now)
+
+    request = urllib.request.Request(
+        TOKEN_ENDPOINT,
+        data=json.dumps(
+            {
+                "grant_type": "refresh_token",
+                "refresh_token": spent_token,
+                "client_id": CLIENT_ID,
+            }
+        ).encode("utf-8"),
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "anthropic-beta": BETA_HEADER,
+            "User-Agent": USER_AGENT,
+        },
+        method="POST",
+    )
+    request_json = opener or _open_json
+    try:
+        response = request_json(request, REFRESH_TIMEOUT)
+    except ClaudeOAuthUnavailable:
+        return None
+
+    access_token = str(response.get("access_token") or "").strip()
+    expires_in = _integer(response.get("expires_in"))
+    if not access_token or expires_in is None:
+        return None
+
+    now_ms = int(now * 1000)
+    updated = dict(oauth)
+    updated["accessToken"] = access_token
+    updated["expiresAt"] = now_ms + expires_in * 1000
+    # A response without a new refresh token means the old one still stands.
+    updated["refreshToken"] = str(response.get("refresh_token") or spent_token)
+    rotated_in = _integer(response.get("refresh_token_expires_in"))
+    if rotated_in is not None:
+        updated["refreshTokenExpiresAt"] = now_ms + rotated_in * 1000
+
+    if not _swap_credentials(credentials_path, spent_token, updated):
+        return None
+
+    raw_scopes = updated.get("scopes")
+    return ClaudeOAuthCredentials(
+        access_token=access_token,
+        expires_at_ms=updated["expiresAt"],
+        scopes=(
+            tuple(str(scope) for scope in raw_scopes if isinstance(scope, str))
+            if isinstance(raw_scopes, list)
+            else ()
+        ),
+    )
+
+
+def _swap_credentials(
+    credentials_path: Path,
+    spent_token: str,
+    updated: Mapping[str, Any],
+) -> bool:
+    """Replace the credential only while it still holds the token we spent."""
+
+    try:
+        current = json.loads(credentials_path.read_text(encoding="utf-8"))
+        if current["claudeAiOauth"]["refreshToken"] != spent_token:
+            # Claude Code refreshed while our request was in flight. Its pair is
+            # the live one; ours is already dead. Leave the file alone.
+            return False
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
+
+    current["claudeAiOauth"] = dict(updated)
+    temporary = credentials_path.with_name(f".{credentials_path.name}.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(current, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        temporary.chmod(0o600)
+        os.replace(temporary, credentials_path)
+    except OSError:
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+        return False
+    return True
+
+
+def _flag_enabled(value: Optional[str]) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def fetch_oauth_snapshot(
     credentials_path: Optional[Path] = None,
     *,
@@ -221,8 +421,21 @@ def fetch_oauth_snapshot(
         Callable[[urllib.request.Request, float], Mapping[str, Any]]
     ] = None,
     now: Optional[datetime] = None,
+    allow_refresh: Optional[bool] = None,
 ) -> ClaudeOAuthSnapshot:
-    credentials = read_credentials(credentials_path)
+    try:
+        credentials = read_credentials(credentials_path)
+    except ClaudeOAuthUnavailable:
+        # An idle machine reaches here every morning: the token expired
+        # overnight and no Claude Code ran to renew it. Refreshing it ourselves
+        # is opt-in, and refresh_credentials returns None whenever it declines,
+        # so without CLAUDE_AUTO_REFRESH this raises exactly as it used to.
+        credentials = refresh_credentials(
+            credentials_path, opener=opener, enabled=allow_refresh
+        )
+        if credentials is None:
+            raise
+
     request = urllib.request.Request(
         endpoint or USAGE_ENDPOINT,
         headers={

@@ -130,6 +130,13 @@ PROVIDER_ORDER=codex,grok,claude,gemini
 # this an idle machine shows stale Grok numbers every morning.
 GROK_AUTO_REFRESH=false
 
+# true renews Claude's OAuth token when it has expired, by refreshing it
+# against Anthropic's token endpoint and writing the new pair back to
+# Claude Code's credential file. Claude tokens last about eight hours and
+# only Claude Code refreshes them, so without this an idle machine shows
+# stale Claude numbers every morning. Linux only.
+CLAUDE_AUTO_REFRESH=false
+
 # true runs `agy models` when Antigravity is not listening. Antigravity only
 # serves quota while it runs, so this starts it for the few seconds a read
 # takes and stops it again.
@@ -290,6 +297,25 @@ Claude OAuth credentials are read from Claude Code's existing
 `~/.claude/.credentials.json`. The indicator never stores or refreshes the
 access token itself. Without valid OAuth credentials, Claude usage is reported
 as unavailable.
+
+`CLAUDE_AUTO_REFRESH=true` lets the poller renew that credential itself. A
+Claude access token lasts about eight hours and Claude Code only refreshes it
+while it runs, so an idle machine shows stale Claude numbers every morning until
+Claude Code next starts. Unlike Grok, there is no cheap command to nudge the CLI
+into refreshing -- measured against Claude Code 2.1.234, none of `claude auth
+status`, `claude doctor` or `claude plugin list` touches the token, and `auth
+status` reports `"loggedIn": true` even for one that expired hours ago -- so the
+refresh is performed directly against the OAuth token endpoint instead.
+
+It is off by default because it rewrites Claude Code's own credential file. When
+enabled it writes only after re-reading the file and confirming the refresh token
+it spent is still the one on disk, and a refresh that fails leaves the file
+untouched. Not available on macOS, where the credential lives in the Keychain.
+
+Back up `~/.claude/.credentials.json` before running commands that touch it.
+Claude Code answers a refresh token it believes is dead by blanking both tokens
+in place, which costs a full `claude auth login`; one credential was lost that
+way while this was being investigated.
 
 ## Testing
 

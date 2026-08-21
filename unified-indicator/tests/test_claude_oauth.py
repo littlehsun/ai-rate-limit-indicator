@@ -8,12 +8,15 @@ from unittest import mock
 
 from claude_oauth import (
     BETA_HEADER,
+    CLIENT_ID,
+    TOKEN_ENDPOINT,
     ClaudeOAuthSnapshot,
     ClaudeOAuthUnavailable,
     ClaudeOAuthWindow,
     fetch_oauth_snapshot,
     read_cache,
     read_credentials,
+    refresh_credentials,
     write_cache,
 )
 
@@ -239,6 +242,184 @@ class ClaudeOAuthKeychainTests(unittest.TestCase):
             broken = Path(tmp) / "broken.json"
             broken.write_text("{not json", encoding="utf-8")
             self.assertIsNone(read_cache(broken))
+
+
+def _refreshable_credential(refresh_token="rt-old", expires_at=0):
+    return json.dumps(
+        {
+            "claudeAiOauth": {
+                "accessToken": "at-old",
+                "refreshToken": refresh_token,
+                "expiresAt": expires_at,
+                "refreshTokenExpiresAt": 5_000_000_000_000,
+                "scopes": ["user:profile"],
+                "subscriptionType": "pro",
+            }
+        },
+        indent=2,
+    )
+
+
+class ClaudeOAuthRefreshTests(unittest.TestCase):
+    """The refresh has to survive a Claude Code running alongside it."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        self.credentials = root / ".credentials.json"
+        self.credentials.write_text(_refreshable_credential(), encoding="utf-8")
+        self.stamp = root / "stamp"
+        patch = mock.patch.dict(os.environ, {"CLAUDE_AUTO_REFRESH": "true"})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def _stored(self):
+        return json.loads(self.credentials.read_text(encoding="utf-8"))["claudeAiOauth"]
+
+    def test_a_refresh_rotates_both_tokens_and_keeps_the_other_fields(self):
+        captured = {}
+
+        def opener(request, timeout):
+            captured["url"] = request.full_url
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            return {
+                "access_token": "at-new",
+                "refresh_token": "rt-new",
+                "expires_in": 28_800,
+                "refresh_token_expires_in": 2_592_000,
+            }
+
+        credentials = refresh_credentials(
+            self.credentials, opener=opener, stamp_path=self.stamp, now=1_000.0
+        )
+
+        self.assertEqual(captured["url"], TOKEN_ENDPOINT)
+        self.assertEqual(captured["body"]["grant_type"], "refresh_token")
+        self.assertEqual(captured["body"]["refresh_token"], "rt-old")
+        self.assertEqual(captured["body"]["client_id"], CLIENT_ID)
+
+        self.assertIsNotNone(credentials)
+        self.assertEqual(credentials.access_token, "at-new")
+        stored = self._stored()
+        self.assertEqual(stored["accessToken"], "at-new")
+        self.assertEqual(stored["refreshToken"], "rt-new")
+        self.assertEqual(stored["expiresAt"], 1_000_000 + 28_800_000)
+        # Fields the token response says nothing about must survive untouched.
+        self.assertEqual(stored["subscriptionType"], "pro")
+        self.assertEqual(stored["scopes"], ["user:profile"])
+        self.assertEqual(self.credentials.stat().st_mode & 0o777, 0o600)
+        # Trimming must not leave the staging file behind.
+        self.assertEqual(
+            sorted(p.name for p in self.credentials.parent.iterdir()),
+            [".credentials.json", "stamp"],
+        )
+
+    def test_a_response_without_a_new_refresh_token_keeps_the_old_one(self):
+        def opener(request, timeout):
+            return {"access_token": "at-new", "expires_in": 28_800}
+
+        refresh_credentials(
+            self.credentials, opener=opener, stamp_path=self.stamp, now=1_000.0
+        )
+
+        self.assertEqual(self._stored()["refreshToken"], "rt-old")
+
+    def test_a_refresh_that_lost_the_race_leaves_the_file_alone(self):
+        # Claude Code refreshed while our request was in flight, so the token we
+        # spent is already dead and its pair is the live one.
+        def opener(request, timeout):
+            self.credentials.write_text(
+                _refreshable_credential(refresh_token="rt-theirs"),
+                encoding="utf-8",
+            )
+            return {
+                "access_token": "at-ours",
+                "refresh_token": "rt-ours",
+                "expires_in": 28_800,
+            }
+
+        credentials = refresh_credentials(
+            self.credentials, opener=opener, stamp_path=self.stamp, now=1_000.0
+        )
+
+        self.assertIsNone(credentials)
+        self.assertEqual(self._stored()["refreshToken"], "rt-theirs")
+        self.assertEqual(self._stored()["accessToken"], "at-old")
+
+    def test_a_failed_refresh_never_blanks_the_credential(self):
+        # Claude Code answers invalid_grant by emptying both tokens on disk,
+        # which costs a full re-login. We must not copy that.
+        def opener(request, timeout):
+            raise ClaudeOAuthUnavailable("Claude OAuth usage request failed")
+
+        before = self.credentials.read_text(encoding="utf-8")
+        credentials = refresh_credentials(
+            self.credentials, opener=opener, stamp_path=self.stamp, now=1_000.0
+        )
+
+        self.assertIsNone(credentials)
+        self.assertEqual(self.credentials.read_text(encoding="utf-8"), before)
+
+    def test_an_explicit_flag_beats_the_environment(self):
+        # The indicator never sees providers.env in its environment, so the
+        # adapter reads the flag and passes it in; that must win either way.
+        def opener(request, timeout):
+            raise AssertionError("no request may be made while the flag is off")
+
+        self.assertIsNone(
+            refresh_credentials(
+                self.credentials,
+                opener=opener,
+                stamp_path=self.stamp,
+                enabled=False,
+            )
+        )
+
+        with mock.patch.dict(os.environ, {"CLAUDE_AUTO_REFRESH": "false"}):
+            credentials = refresh_credentials(
+                self.credentials,
+                opener=lambda request, timeout: {
+                    "access_token": "at-new",
+                    "expires_in": 28_800,
+                },
+                stamp_path=self.stamp,
+                now=1_000.0,
+                enabled=True,
+            )
+        self.assertIsNotNone(credentials)
+
+    def test_the_flag_is_opt_in(self):
+        def opener(request, timeout):
+            raise AssertionError("no request may be made while the flag is off")
+
+        with mock.patch.dict(os.environ, {"CLAUDE_AUTO_REFRESH": "false"}):
+            self.assertIsNone(
+                refresh_credentials(
+                    self.credentials, opener=opener, stamp_path=self.stamp
+                )
+            )
+
+    def test_a_recent_attempt_holds_the_next_one_off(self):
+        calls = []
+
+        def opener(request, timeout):
+            calls.append(request)
+            return {"access_token": "at-new", "expires_in": 28_800}
+
+        refresh_credentials(
+            self.credentials, opener=opener, stamp_path=self.stamp, now=1_000.0
+        )
+        refresh_credentials(
+            self.credentials, opener=opener, stamp_path=self.stamp, now=1_060.0
+        )
+        self.assertEqual(len(calls), 1)
+
+        # Past the cooldown it may try again.
+        refresh_credentials(
+            self.credentials, opener=opener, stamp_path=self.stamp, now=1_400.0
+        )
+        self.assertEqual(len(calls), 2)
 
 
 if __name__ == "__main__":

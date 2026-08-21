@@ -308,24 +308,41 @@ def load_claude() -> ProviderSnapshot:
         write_cache,
     )
 
-    # Claude Code owns refreshing this token, and it only does so while it runs.
-    # Keeping the last snapshot means an idle machine shows stale numbers with a
-    # reason instead of an empty panel.
+    # Claude Code refreshes this token only while it runs, so an idle machine
+    # wakes up with an expired one. CLAUDE_AUTO_REFRESH (off by default) lets
+    # the poller mint a fresh token itself; without it, the cached snapshot
+    # still means a stale panel with a reason rather than an empty one.
     #
-    # There is deliberately no equivalent of the Grok CLI nudge here yet, because
-    # nobody has shown a cheap way to trigger the refresh. CodexBar has
-    # `claude auth status` and uses it only to test whether a login exists; to
-    # force a refresh it drives an interactive PTY and sends `/status`. Before
-    # copying either, test the cheap command on Linux: macOS keeps this token
-    # continuously refreshed, so every attempt to observe an expired one
-    # refreshes it away. If it turns out only the PTY works, weigh that against
-    # what it cost CodexBar — probes that spawned the CLI without
-    # DISABLE_AUTOUPDATER=1 restarted an unfinished auto-update every time and
-    # pulled 90 GiB in three days (their #2052), delegated refresh could open the
-    # user's browser (#1844), and they measured an 8.6% probe success rate.
+    # Nudging the CLI into refreshing -- the way GROK_AUTO_REFRESH runs
+    # `grok models` -- does not work here. Measured against Claude Code 2.1.234,
+    # with a token good for another 8h and again with one expired 7h40m:
+    # `claude auth status`, `claude doctor` and `claude plugin list` all leave
+    # expiresAt, the access token digest and the file mtime unchanged, and
+    # `claude project list` does not exist. `auth status` even answers
+    # "loggedIn": true for the long-expired token, so it reports that a
+    # credential exists, not that it works. CodexBar drives an interactive PTY
+    # and sends /status instead, which costs more than it returns: probes that
+    # spawned the CLI without DISABLE_AUTOUPDATER=1 restarted an unfinished
+    # auto-update every time and pulled 90 GiB in three days (their #2052),
+    # delegated refresh could open the user's browser (#1844), and they measured
+    # an 8.6% probe success rate (#2241).
+    #
+    # Doing the refresh directly is cheaper than any of that -- one POST to
+    # /v1/oauth/token -- and claude_oauth.refresh_credentials does exactly that.
+    # See it for the two rules that make it safe to run underneath a live Claude
+    # Code: the write is a compare-and-swap because the refresh token rotates,
+    # and a failed refresh changes nothing on disk. That second rule is the
+    # important one. Claude Code answers a dead refresh token by blanking
+    # accessToken and refreshToken in place -- its own telemetry calls this
+    # tengu_oauth_refresh_token_cleared_on_disk -- and the user pays for it with
+    # a full `claude auth login`. One credential here was lost that way while
+    # this was being investigated.
     error = None
+    auto_refresh = read_manager_config().get("CLAUDE_AUTO_REFRESH", "false").lower()
     try:
-        oauth_snapshot = fetch_oauth_snapshot()
+        oauth_snapshot = fetch_oauth_snapshot(
+            allow_refresh=auto_refresh in {"1", "true", "yes", "on"}
+        )
         write_cache(oauth_snapshot)
     except ClaudeOAuthUnavailable as exc:
         error = str(exc)
