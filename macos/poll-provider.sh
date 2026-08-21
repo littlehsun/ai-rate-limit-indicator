@@ -22,8 +22,11 @@ trim_log() {
     # place so the descriptor launchd already opened stays valid.
     local log="$1"
     local size
-    size="$(/usr/bin/stat -f%z "$log" 2>/dev/null || echo 0)"
-    [[ "$size" -le "$LOG_MAX_BYTES" ]] && return 0
+    # BSD stat spells a file size -f%z and GNU stat spells it -c%s, so asking
+    # either one by name silently reports 0 on the other platform and the log
+    # never gets trimmed. wc -c means the same thing on both.
+    size="$(wc -c < "$log" 2>/dev/null || echo 0)"
+    [[ "${size:-0}" -le "$LOG_MAX_BYTES" ]] && return 0
 
     local staged="$log.trim"
     if /usr/bin/tail -c "$((LOG_MAX_BYTES / 2))" "$log" > "$staged" 2>/dev/null; then

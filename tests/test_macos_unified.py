@@ -10,6 +10,30 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MACOS = ROOT / "macos"
 
+# poll-provider.sh lets a variable already present in the environment win over
+# the same key in wham.env, which is what an operator wants and what a test
+# inherits by accident. A developer machine that exports any of these — Linux
+# desktops routinely set XDG_CACHE_HOME — would otherwise silently override the
+# wham.env the test just wrote and assert against its own shell instead.
+WHAM_ENV_KEYS = (
+    "CHATGPT_ACCESS_TOKEN",
+    "CHATGPT_BEARER_TOKEN",
+    "CHATGPT_WHAM_RESET_CREDITS_URL",
+    "CHATGPT_WHAM_TIMEOUT",
+    "CHATGPT_WHAM_USAGE_URL",
+    "CODEX_AUTH_FILE",
+    "CODEX_RATE_WHAM_CACHE",
+    "XDG_CACHE_HOME",
+)
+
+
+def clean_environment() -> dict[str, str]:
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if key not in WHAM_ENV_KEYS
+    }
+
 
 class UnifiedMacOSTests(unittest.TestCase):
     def test_codex_poller_requires_network_source_opt_in(self):
@@ -39,7 +63,7 @@ class UnifiedMacOSTests(unittest.TestCase):
                 encoding="utf-8",
             )
             fake_python.chmod(0o700)
-            environment = os.environ.copy()
+            environment = clean_environment()
             environment.update(
                 {
                     "HOME": str(temp_dir),
@@ -175,7 +199,7 @@ class UnifiedMacOSTests(unittest.TestCase):
                 encoding="utf-8",
             )
             fake_python.chmod(0o700)
-            environment = os.environ.copy()
+            environment = clean_environment()
             environment.update(
                 {
                     "MARKER": str(marker),
