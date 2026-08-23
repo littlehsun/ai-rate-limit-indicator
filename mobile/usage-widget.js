@@ -22,10 +22,29 @@ const ENDPOINT = (args.widgetParameter || "").trim() || DEFAULT_ENDPOINT;
 //                              a second number
 const SMALL_ROWS = [
   { provider: "codex" },
-  { provider: "claude", windows: ["5h", "7d"], combine: true },
+  { provider: "claude", windows: ["7d", "5h"], combine: true },
   { provider: "grok" },
-  { provider: "gemini" },
+  { provider: "gemini", windows: ["7d", "5h"], combine: true },
 ];
+
+// Which windows a provider shows, first one first. The leading window draws the
+// bar; the rest ride along as numbers. Codex and Grok only report a weekly one,
+// so leading with 7D everywhere is what makes the four bars comparable at a
+// glance — a 5H bar next to a 7D bar measures different things at the same
+// width. Providers absent here keep their backend order.
+const MEDIUM_WINDOWS = {
+  claude: ["7d", "5h"],
+  gemini: ["7d", "5h"],
+};
+
+function pickWindows(provider) {
+  const wanted = MEDIUM_WINDOWS[provider.provider];
+  if (!wanted) return provider.windows;
+  const chosen = wanted
+    .map((id) => provider.windows.find((w) => w.id === id))
+    .filter(Boolean);
+  return chosen.length ? chosen : provider.windows;
+}
 
 // Tapping play in Scriptable reports no widget family, so pick one. Large
 // shows every window, which is what you want when checking a change; set it to
@@ -317,7 +336,7 @@ function largeCells(payload) {
 function mediumCells(payload) {
   return payload.providers.map((provider) => {
     const label = cellLabel(provider);
-    const windows = provider.windows;
+    const windows = pickWindows(provider);
     if (windows.length === 0) {
       return { provider, label, window: MISSING_WINDOW, detail: "no data" };
     }
@@ -330,8 +349,8 @@ function mediumCells(payload) {
       };
     }
     if (windows.length === 2) {
-      // A provider with exactly a session and a weekly window shows both, the
-      // way Claude does: the bar tracks the first, the second rides along.
+      // A weekly window and a session window: the weekly one draws the bar
+      // and the session rides along, matching what the small widget shows.
       return {
         provider,
         label,
