@@ -34,10 +34,11 @@ const PROVIDER_ORDER = ["codex", "claude", "grok", "gemini"];
 
 const PROVIDER_WINDOWS = {
   claude: { bar: "7d", also: ["5h"] },
-  // Antigravity reports two groups. Gemini leads because it is the primary one;
-  // Claude/GPT rides along so an exhausted pool there cannot hide behind an
-  // idle Gemini one.
-  gemini: { bar: "7d", also: ["5h", "claude-gpt-5h", "claude-gpt-7d"] },
+  // Antigravity reports a Gemini group and a Claude/GPT one. Carrying both here
+  // put four unlabelled percentages in a cell 150pt wide, which was unreadable
+  // at a glance — the thing these sizes exist for. Only Gemini, then; the large
+  // widget still lists every Claude/GPT window with its name attached.
+  gemini: { bar: "7d", also: ["5h"] },
 };
 
 function pickWindows(provider) {
@@ -371,9 +372,8 @@ function smallRows(payload) {
       provider,
       label: cellLabel(provider),
       window: bar || MISSING_WINDOW,
-      // 132pt of row holds a name and two numbers. Antigravity's other group
-      // needs two more, which do not fit and would read as four unlabelled
-      // percentages anyway; the medium and large sizes carry them instead.
+      // 132pt of row holds a name and two numbers, so a provider configured
+      // with more of them loses the surplus here rather than overflowing.
       extras: also.slice(0, 1),
     };
   });
