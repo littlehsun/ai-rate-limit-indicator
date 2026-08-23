@@ -64,7 +64,14 @@ globalThis.Request = class {
   async loadJSON() {
     globalThis.__attempts += 1;
     if (globalThis.__FAIL_FETCH) throw new Error("unreachable");
-    return payload;
+    if (!globalThis.__DROP) return payload;
+    // Antigravity stops reporting a window once its quota is spent.
+    return {
+      providers: payload.providers.map((p) => ({
+        ...p,
+        windows: p.windows.filter((w) => !globalThis.__DROP.includes(w.id)),
+      })),
+    };
   }
 };
 globalThis.FileManager = {
@@ -85,13 +92,14 @@ const source = fs.readFileSync(SOURCE, "utf8");
 async function render(family, opts = {}) {
   const { fail = false, cached = false, cacheAge = Date.now() } = opts;
   globalThis.__FAIL_FETCH = fail;
+  globalThis.__DROP = opts.drop || null;
   globalThis.__CACHED = cached;
   globalThis.__CACHE_AGE = cacheAge;
   globalThis.config = { widgetFamily: family, runsInWidget: !opts.interactive };
   captured = null;
   globalThis.__presented = null;
   const module = `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
-  await import(`${module}#${family}-${fail}-${cached}-${cacheAge}-${!!opts.interactive}`);
+  await import(`${module}#${family}-${fail}-${cached}-${cacheAge}-${!!opts.interactive}-${(opts.drop||[]).join()}`);
   return flatten((captured || globalThis.__presented).nodes);
 }
 
@@ -127,6 +135,11 @@ const inWidget = globalThis.__attempts;
 globalThis.__attempts = 0;
 await render("small", { fail: true, cached: true, interactive: true });
 console.log(`\n=== retry 次數：widget ${inWidget}（應為 1）／互動 ${globalThis.__attempts}（應為 3）===`);
+
+console.log("\n=== Antigravity 週額度用盡：5h 這個 window 消失 ===");
+for (const line of await render("small", { drop: ["5h"] })) console.log("  " + line);
+console.log("--- medium ---");
+for (const line of await render("medium", { drop: ["5h"] })) console.log("  " + line);
 
 console.log("\n=== 行數檢查 ===");
 // A row starts with its label; percentages and reset times trail it.

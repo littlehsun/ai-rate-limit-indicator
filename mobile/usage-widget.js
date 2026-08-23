@@ -41,12 +41,27 @@ const PROVIDER_WINDOWS = {
   gemini: { bar: "7d", also: ["5h"] },
 };
 
+// Antigravity drops a window once its quota is spent: the bucket comes back
+// marked `disabled` and the adapter skips it, so a Gemini account at 100% for
+// the week stops reporting its five-hour window at all. Leaving the number out
+// would shorten the row and move everything beside it, so the slot stays and
+// says it has nothing rather than reporting a figure nobody sent.
+function absentWindow(id) {
+  const cadence = id.split("-").pop().toUpperCase();
+  return { id, label: cadence, used_percent: null, resets_at: null };
+}
+
 function pickWindows(provider) {
   const wanted = PROVIDER_WINDOWS[provider.provider];
   const find = (id) => provider.windows.find((w) => w.id === id);
   if (!wanted) return { bar: provider.windows[0], also: [] };
   const bar = find(wanted.bar) || provider.windows[0];
-  return { bar, also: (wanted.also || []).map(find).filter(Boolean) };
+  const also = (wanted.also || []).map((id) => find(id) || absentWindow(id));
+  return { bar, also: bar ? also : [] };
+}
+
+function percentLabel(window) {
+  return window.used_percent === null ? "--" : `${window.used_percent}%`;
 }
 
 // Tapping play in Scriptable reports no widget family, so pick one. Large
@@ -213,9 +228,10 @@ function addWindowRow(container, provider, window, options) {
   // to right walks from the soonest reset to the longest, and the number the
   // bar belongs to sits closest to it.
   for (const extra of options.extras || []) {
-    const tail = row.addText(`${extra.used_percent}%`);
+    const tail = row.addText(percentLabel(extra));
     tail.font = Font.systemFont(10);
-    tail.textColor = options.dim ? INK_3 : colorFor(extra.used_percent);
+    tail.textColor =
+      options.dim || extra.used_percent === null ? INK_3 : colorFor(extra.used_percent);
     row.addSpacer(4);
   }
 
@@ -264,9 +280,10 @@ function addBlock(container, cell, options) {
   top.addSpacer();
 
   for (const extra of cell.extras || []) {
-    const tail = top.addText(`${extra.used_percent}%`);
+    const tail = top.addText(percentLabel(extra));
     tail.font = Font.semiboldSystemFont(10);
-    tail.textColor = options.dim ? INK_3 : colorFor(extra.used_percent);
+    tail.textColor =
+      options.dim || extra.used_percent === null ? INK_3 : colorFor(extra.used_percent);
     top.addSpacer(4);
   }
 
@@ -350,7 +367,9 @@ function resetDetail(bar, also) {
   // The session window resets first and is the one you check before starting
   // something, so it leads here the same way it leads the numbers.
   const session = also[0];
-  if (!session) return `${bar.label} · ${resetLabel(bar.resets_at)}`;
+  if (!session || session.used_percent === null) {
+    return `${bar.label} · ${resetLabel(bar.resets_at)}`;
+  }
   return `${session.label} ${resetLabel(session.resets_at)} · ${bar.label} ${resetLabel(bar.resets_at)}`;
 }
 
