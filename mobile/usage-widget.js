@@ -33,12 +33,19 @@ const ENDPOINT = (args.widgetParameter || "").trim() || DEFAULT_ENDPOINT;
 const PROVIDER_ORDER = ["codex", "claude", "grok", "gemini"];
 
 const PROVIDER_WINDOWS = {
-  claude: { bar: "7d", also: ["5h"] },
+  claude: { bar: "7d", also: ["5h"], all: ["5h", "7d"] },
   // Antigravity reports a Gemini group and a Claude/GPT one. Carrying both here
   // put four unlabelled percentages in a cell 150pt wide, which was unreadable
   // at a glance — the thing these sizes exist for. Only Gemini, then; the large
   // widget still lists every Claude/GPT window with its name attached.
-  gemini: { bar: "7d", also: ["5h"] },
+  gemini: {
+    bar: "7d",
+    also: ["5h"],
+    // The large widget lists every window, so it needs to know which ones are
+    // meant to exist: a spent quota makes its window disappear from the payload
+    // entirely, and a block that vanishes moves every block after it.
+    all: ["5h", "7d", "claude-gpt-5h", "claude-gpt-7d"],
+  },
 };
 
 // Antigravity drops a window once its quota is spent: the bucket comes back
@@ -193,6 +200,9 @@ function addBar(container, percent, width) {
   track.layoutHorizontally();
   track.cornerRadius = 2;
   track.backgroundColor = TRACK;
+  // A window nobody reported gets an empty track. Drawing a zero-length fill
+  // in the usual green would claim the quota is untouched.
+  if (percent === null) return;
   const fill = track.addStack();
   fill.size = new Size(Math.max(2, (width * Math.min(percent, 100)) / 100), 4);
   fill.cornerRadius = 2;
@@ -287,9 +297,10 @@ function addBlock(container, cell, options) {
     top.addSpacer(4);
   }
 
-  const value = top.addText(`${options.stale ? "~" : ""}${cell.window.used_percent}%`);
+  const missing = cell.window.used_percent === null;
+  const value = top.addText(`${options.stale && !missing ? "~" : ""}${percentLabel(cell.window)}`);
   value.font = Font.boldSystemFont(16);
-  value.textColor = options.dim ? INK_3 : colorFor(cell.window.used_percent);
+  value.textColor = options.dim || missing ? INK_3 : colorFor(cell.window.used_percent);
 
   box.addSpacer(5);
   addBar(box, cell.window.used_percent, options.width);
@@ -341,13 +352,18 @@ function largeCells(payload) {
       });
       continue;
     }
-    for (const window of provider.windows) {
+    const expected = (PROVIDER_WINDOWS[provider.provider] || {}).all;
+    const listed = expected
+      ? expected.map((id) => provider.windows.find((w) => w.id === id) || absentWindow(id))
+      : provider.windows;
+    for (const window of listed) {
       const named = qualify(provider, window);
       cells.push({
         provider,
         label: short ? `${short} ${named}` : named,
         window,
-        detail: `reset ${resetLabel(window.resets_at)}`,
+        detail:
+          window.used_percent === null ? "not reported" : `reset ${resetLabel(window.resets_at)}`,
       });
     }
   }

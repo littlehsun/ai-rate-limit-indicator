@@ -140,6 +140,8 @@ console.log("\n=== Antigravity 週額度用盡：5h 這個 window 消失 ===");
 for (const line of await render("small", { drop: ["5h"] })) console.log("  " + line);
 console.log("--- medium ---");
 for (const line of await render("medium", { drop: ["5h"] })) console.log("  " + line);
+console.log("--- large ---");
+for (const line of await render("large", { drop: ["5h"] })) console.log("  " + line);
 
 console.log("\n=== 行數檢查 ===");
 // A row starts with its label; percentages and reset times trail it.
