@@ -20,30 +20,32 @@ const ENDPOINT = (args.widgetParameter || "").trim() || DEFAULT_ENDPOINT;
 //   windows: [a, b]            one row each
 //   windows: [a, b], combine   one row: `a` draws the bar, `b` rides along as
 //                              a second number
-const SMALL_ROWS = [
-  { provider: "codex" },
-  { provider: "claude", windows: ["7d", "5h"], combine: true },
-  { provider: "grok" },
-  { provider: "gemini", windows: ["7d", "5h"], combine: true },
-];
+// What each provider shows in the small and medium widgets. `bar` is the
+// window the progress bar measures and the large number reports; `also` are
+// smaller numbers printed to its left, in this order.
+//
+// Every bar is a weekly window. Codex and Grok only report one, so leading with
+// 7D everywhere is what makes four bars of the same width comparable — a 5H bar
+// beside a 7D bar measures different things at identical length. The session
+// windows still matter, so they ride along as numbers rather than disappearing.
+//
+// Providers absent here show their first backend window and nothing else.
+const PROVIDER_ORDER = ["codex", "claude", "grok", "gemini"];
 
-// Which windows a provider shows, first one first. The leading window draws the
-// bar; the rest ride along as numbers. Codex and Grok only report a weekly one,
-// so leading with 7D everywhere is what makes the four bars comparable at a
-// glance — a 5H bar next to a 7D bar measures different things at the same
-// width. Providers absent here keep their backend order.
-const MEDIUM_WINDOWS = {
-  claude: ["7d", "5h"],
-  gemini: ["7d", "5h"],
+const PROVIDER_WINDOWS = {
+  claude: { bar: "7d", also: ["5h"] },
+  // Antigravity reports two groups. Gemini leads because it is the primary one;
+  // Claude/GPT rides along so an exhausted pool there cannot hide behind an
+  // idle Gemini one.
+  gemini: { bar: "7d", also: ["5h", "claude-gpt-5h", "claude-gpt-7d"] },
 };
 
 function pickWindows(provider) {
-  const wanted = MEDIUM_WINDOWS[provider.provider];
-  if (!wanted) return provider.windows;
-  const chosen = wanted
-    .map((id) => provider.windows.find((w) => w.id === id))
-    .filter(Boolean);
-  return chosen.length ? chosen : provider.windows;
+  const wanted = PROVIDER_WINDOWS[provider.provider];
+  const find = (id) => provider.windows.find((w) => w.id === id);
+  if (!wanted) return { bar: provider.windows[0], also: [] };
+  const bar = find(wanted.bar) || provider.windows[0];
+  return { bar, also: (wanted.also || []).map(find).filter(Boolean) };
 }
 
 // Tapping play in Scriptable reports no widget family, so pick one. Large
@@ -206,18 +208,19 @@ function addWindowRow(container, provider, window, options) {
     row.addSpacer(6);
   }
 
-  const value = row.addText(`${options.stale ? "~" : ""}${window.used_percent}%`);
-  value.font = Font.boldSystemFont(12);
-  value.textColor = options.dim ? INK_3 : INK;
-
+  // Session windows first, then the weekly one the bar measures. Reading left
+  // to right walks from the soonest reset to the longest, and the number the
+  // bar belongs to sits closest to it.
   for (const extra of options.extras || []) {
-    row.addSpacer(4);
-    // Only one window can own the bar, so the others are numbers only. They
-    // stay lighter so the row still reads as one provider, not two.
     const tail = row.addText(`${extra.used_percent}%`);
     tail.font = Font.systemFont(10);
     tail.textColor = options.dim ? INK_3 : colorFor(extra.used_percent);
+    row.addSpacer(4);
   }
+
+  const value = row.addText(`${options.stale ? "~" : ""}${window.used_percent}%`);
+  value.font = Font.boldSystemFont(12);
+  value.textColor = options.dim ? INK_3 : INK;
 
   const barRow = container.addStack();
   barRow.layoutHorizontally();
@@ -259,16 +262,16 @@ function addBlock(container, cell, options) {
   name.minimumScaleFactor = 0.7;
   top.addSpacer();
 
+  for (const extra of cell.extras || []) {
+    const tail = top.addText(`${extra.used_percent}%`);
+    tail.font = Font.semiboldSystemFont(10);
+    tail.textColor = options.dim ? INK_3 : colorFor(extra.used_percent);
+    top.addSpacer(4);
+  }
+
   const value = top.addText(`${options.stale ? "~" : ""}${cell.window.used_percent}%`);
   value.font = Font.boldSystemFont(16);
   value.textColor = options.dim ? INK_3 : colorFor(cell.window.used_percent);
-
-  if (cell.secondary) {
-    top.addSpacer(4);
-    const tail = top.addText(`${cell.secondary.used_percent}%`);
-    tail.font = Font.semiboldSystemFont(10);
-    tail.textColor = options.dim ? INK_3 : colorFor(cell.secondary.used_percent);
-  }
 
   box.addSpacer(5);
   addBar(box, cell.window.used_percent, options.width);
@@ -333,80 +336,47 @@ function largeCells(payload) {
   return cells;
 }
 
+function orderedProviders(payload) {
+  const found = PROVIDER_ORDER.map((id) =>
+    payload.providers.find((p) => p.provider === id),
+  ).filter(Boolean);
+  // Anything the backend adds later still shows up, just after the known four.
+  const extra = payload.providers.filter((p) => !PROVIDER_ORDER.includes(p.provider));
+  return found.concat(extra);
+}
+
+function resetDetail(bar, also) {
+  // The session window resets first and is the one you check before starting
+  // something, so it leads here the same way it leads the numbers.
+  const session = also[0];
+  if (!session) return `${bar.label} · ${resetLabel(bar.resets_at)}`;
+  return `${session.label} ${resetLabel(session.resets_at)} · ${bar.label} ${resetLabel(bar.resets_at)}`;
+}
+
 function mediumCells(payload) {
-  return payload.providers.map((provider) => {
+  return orderedProviders(payload).map((provider) => {
     const label = cellLabel(provider);
-    const windows = pickWindows(provider);
-    if (windows.length === 0) {
-      return { provider, label, window: MISSING_WINDOW, detail: "no data" };
+    const { bar, also } = pickWindows(provider);
+    if (!bar) {
+      return { provider, label, window: MISSING_WINDOW, extras: [], detail: "no data" };
     }
-    if (windows.length === 1) {
-      return {
-        provider,
-        label,
-        window: windows[0],
-        detail: `${windows[0].label} · ${resetLabel(windows[0].resets_at)}`,
-      };
-    }
-    if (windows.length === 2) {
-      // A weekly window and a session window: the weekly one draws the bar
-      // and the session rides along, matching what the small widget shows.
-      return {
-        provider,
-        label,
-        window: windows[0],
-        secondary: windows[1],
-        detail: windows
-          .map((w) => `${w.label} ${resetLabel(w.resets_at)}`)
-          .join(" · "),
-      };
-    }
-    // Antigravity sends four: Gemini and Claude/GPT, each with a session and a
-    // weekly window. One cell cannot hold four, so it holds whichever is
-    // closest to running out, and names which one that is.
-    const window = tightest(windows);
-    return {
-      provider,
-      label,
-      window,
-      detail: `${window.label} · ${resetLabel(window.resets_at)}`,
-    };
+    return { provider, label, window: bar, extras: also, detail: resetDetail(bar, also) };
   });
 }
 
 function smallRows(payload) {
-  const rows = [];
-  for (const wanted of SMALL_ROWS) {
-    const provider = payload.providers.find((p) => p.provider === wanted.provider);
-    if (!provider) continue;
-    const windows = wanted.windows
-      ? wanted.windows.map((id) => provider.windows.find((w) => w.id === id)).filter(Boolean)
-      : provider.windows.slice(0, 1);
-    if (windows.length === 0) {
-      rows.push({ provider, window: MISSING_WINDOW, label: cellLabel(provider) });
-      continue;
-    }
-    if (wanted.combine) {
-      // The bar can only track one window, so the rest ride along as numbers.
-      rows.push({
-        provider,
-        window: windows[0],
-        label: cellLabel(provider),
-        extras: windows.slice(1),
-      });
-      continue;
-    }
-    for (const window of windows) {
-      // One row can carry the provider's name alone; two rows for the same
-      // provider have to say which window each one is.
-      rows.push({
-        provider,
-        window,
-        label: windows.length > 1 ? qualify(provider, window) : cellLabel(provider),
-      });
-    }
-  }
-  return rows;
+  return orderedProviders(payload).map((provider) => {
+    const { bar, also } = pickWindows(provider);
+    return {
+      provider,
+      label: cellLabel(provider),
+      window: bar || MISSING_WINDOW,
+      // 132pt of row holds a name and two numbers. Antigravity's other group
+      // needs two more, which do not fit and would read as four unlabelled
+      // percentages anyway; the medium and large sizes carry them instead.
+      extras: also.slice(0, 1),
+    };
+  });
 }
 
 // Lock Screen and StandBy widgets are rendered monochrome by iOS, so the
@@ -445,15 +415,12 @@ function accessoryGauge(percent, size) {
 }
 
 function accessoryRows(payload) {
-  return SMALL_ROWS.map((wanted) => {
-    const provider = payload.providers.find((p) => p.provider === wanted.provider);
-    if (!provider || provider.windows.length === 0) return null;
-    const windows = wanted.windows
-      ? wanted.windows.map((id) => provider.windows.find((w) => w.id === id)).filter(Boolean)
-      : provider.windows.slice(0, 1);
-    const window = windows.length ? tightest(windows) : provider.windows[0];
-    return { provider, label: cellLabel(provider), window };
-  }).filter(Boolean);
+  return orderedProviders(payload)
+    .map((provider) => {
+      const { bar } = pickWindows(provider);
+      return bar ? { provider, label: cellLabel(provider), window: bar } : null;
+    })
+    .filter(Boolean);
 }
 
 function buildAccessory(state, family) {
