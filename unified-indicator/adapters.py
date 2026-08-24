@@ -255,9 +255,19 @@ def load_codex() -> ProviderSnapshot:
     # The wham cache only moves while the codex CLI keeps a live token, so an
     # expired one explains a blank or frozen panel better than silence does.
     # Local rollout data needs no token, so only ask once wham has let us down.
+    #
+    # CODEX_AUTO_REFRESH (off by default) is the same opt-in as
+    # CLAUDE_AUTO_REFRESH and mints a token the same way -- see
+    # wham.refresh_access_token for the compare-and-swap that makes writing
+    # auth.json safe underneath a running codex CLI. Asking here rather than
+    # only in the wham poll unit means the token is live again by the next
+    # tick instead of the one after it.
     error = None
     if uses_wham and (snapshot is None or _freshness(snapshot.updated_at) != "fresh"):
-        if resolve_access_token() is None:
+        auto_refresh = read_manager_config().get("CODEX_AUTO_REFRESH", "false").lower()
+        if resolve_access_token(
+            allow_refresh=auto_refresh in {"1", "true", "yes", "on"}
+        ) is None:
             error = describe_missing_token()
 
     if snapshot is None:

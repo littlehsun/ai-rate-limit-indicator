@@ -8,18 +8,26 @@ import os
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional
 
 from codex_rate import FIVE_HOUR_MINUTES, WEEKLY_MINUTES, CodexRateSnapshot, RateWindow, format_indicator_label
 
 
 USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 RESET_CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
+TOKEN_ENDPOINT = "https://auth.openai.com/oauth/token"
+# The codex CLI's own OAuth client. A refresh minted under a different client
+# id is rejected, so this has to match the CLI that owns auth.json.
+CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
+USER_AGENT = "codex-rate-indicator/1.0"
 TOKEN_EXPIRY_LEEWAY_SECONDS = 60
+REFRESH_COOLDOWN = 300.0
+REFRESH_TIMEOUT = 30.0
 
 
 def default_wham_cache_path() -> Path:
@@ -32,17 +40,23 @@ def default_codex_auth_path() -> Path:
     return Path(os.environ.get("CODEX_AUTH_FILE", Path.home() / ".codex" / "auth.json"))
 
 
-def resolve_access_token(*, now: Optional[int] = None) -> Optional[str]:
+def resolve_access_token(
+    *,
+    now: Optional[int] = None,
+    allow_refresh: Optional[bool] = None,
+) -> Optional[str]:
     for candidate in (
         _optional_str(os.environ.get("CHATGPT_ACCESS_TOKEN")),
         _optional_str(os.environ.get("CHATGPT_BEARER_TOKEN")),
         read_codex_access_token(default_codex_auth_path()),
     ):
-        # An expired token only earns a 401 on every poll. The codex CLI owns
-        # refreshing it, so skip it and let the caller say so.
+        # An expired token only earns a 401 on every poll.
         if candidate is not None and not token_is_expired(candidate, now=now):
             return candidate
-    return None
+    # Nothing on hand is usable. The codex CLI is the usual thing that renews
+    # auth.json, and on a machine where it never runs nothing does, so mint a
+    # token ourselves when the user has opted in.
+    return refresh_access_token(enabled=allow_refresh, now=now)
 
 
 def read_codex_access_token(path: Path) -> Optional[str]:
@@ -85,8 +99,8 @@ def describe_missing_token(path: Optional[Path] = None) -> str:
         # CLI once is enough. Telling people to sign in again would send them
         # through a login they almost certainly do not need.
         return (
-            "Codex access token expired; run the codex CLI once to refresh it "
-            f"({auth_path})"
+            "Codex access token expired; run the codex CLI once to refresh it, "
+            f"or set CODEX_AUTO_REFRESH=true ({auth_path})"
         )
     return (
         "CHATGPT_ACCESS_TOKEN or "
@@ -108,6 +122,204 @@ def _jwt_expiry(token: str) -> Optional[int]:
         return None
     expires_at = claims.get("exp")
     return expires_at if isinstance(expires_at, int) else None
+
+
+def default_refresh_stamp_path() -> Path:
+    return Path(
+        os.environ.get(
+            "CODEX_REFRESH_STAMP",
+            Path.home() / ".cache" / "rate-limit-indicator" / "codex-refresh-attempt",
+        )
+    )
+
+
+def refresh_is_in_cooldown(
+    stamp_path: Optional[Path] = None,
+    *,
+    now: Optional[float] = None,
+) -> bool:
+    """Report whether the last refresh is recent enough to skip this one."""
+
+    path = stamp_path or default_refresh_stamp_path()
+    now = time.time() if now is None else now
+    try:
+        last_attempt = float(path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return False
+    # A clock that jumped backwards must not lock refreshing out until it
+    # catches up, so a negative age counts as no cooldown at all.
+    return 0.0 <= now - last_attempt < REFRESH_COOLDOWN
+
+
+def record_refresh_attempt(
+    stamp_path: Optional[Path] = None,
+    *,
+    now: Optional[float] = None,
+) -> None:
+    path = stamp_path or default_refresh_stamp_path()
+    now = time.time() if now is None else now
+    try:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        path.write_text(f"{now}\n", encoding="utf-8")
+    except OSError:
+        # Losing the stamp costs us the cooldown, not the refresh.
+        pass
+
+
+def refresh_access_token(
+    path: Optional[Path] = None,
+    *,
+    opener: Optional[
+        Callable[[urllib.request.Request, float], Mapping[str, Any]]
+    ] = None,
+    stamp_path: Optional[Path] = None,
+    now: Optional[float] = None,
+    enabled: Optional[bool] = None,
+) -> Optional[str]:
+    """Exchange the stored refresh token for a live access token.
+
+    The codex CLI renews auth.json only while it runs, so a machine that polls
+    without ever opening the CLI wakes up with an expired token and nothing to
+    fix it. The refresh is one POST, and the CLI re-reads the file before every
+    refresh of its own, so writing the new tokens back is enough to keep it
+    working.
+
+    The same two rules as claude_oauth.refresh_credentials make that safe to do
+    underneath a running codex CLI:
+
+    * The refresh token may rotate. Whoever spends it first invalidates the
+      other copy, so the write is a compare-and-swap -- re-read the file and
+      only replace tokens that still hold the token we spent.
+    * A refresh that fails must change nothing. Leaving the file exactly as it
+      was costs the caller one expired token, which is the state it was already
+      reporting; blanking it would cost the user a full `codex login`.
+    """
+
+    # The unified indicator starts from a desktop autostart entry, which never
+    # sources providers.env, so that caller reads the flag from the config and
+    # passes it in. The environment is what the wham poll unit supplies.
+    if enabled is None:
+        enabled = _flag_enabled(os.environ.get("CODEX_AUTO_REFRESH"))
+    if not enabled:
+        return None
+
+    auth_path = path or default_codex_auth_path()
+    try:
+        payload = json.loads(auth_path.read_text(encoding="utf-8"))
+        tokens = payload["tokens"]
+        spent_token = str(tokens["refresh_token"] or "").strip()
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+    if not spent_token:
+        return None
+
+    now = time.time() if now is None else now
+    stamp = stamp_path or default_refresh_stamp_path()
+    # The poller fires every 60s. Without a cooldown, a refresh that keeps
+    # failing earns a request every tick for as long as it stays broken.
+    # Stamping before the request means a hang still counts as an attempt.
+    if refresh_is_in_cooldown(stamp, now=now):
+        return None
+    record_refresh_attempt(stamp, now=now)
+
+    request = urllib.request.Request(
+        TOKEN_ENDPOINT,
+        data=urllib.parse.urlencode(
+            {
+                "grant_type": "refresh_token",
+                "client_id": CLIENT_ID,
+                "refresh_token": spent_token,
+            }
+        ).encode("utf-8"),
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": USER_AGENT,
+        },
+        method="POST",
+    )
+    request_json = opener or _post_json
+    try:
+        response = request_json(request, REFRESH_TIMEOUT)
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+
+    access_token = _optional_str(response.get("access_token"))
+    if access_token is None:
+        return None
+
+    updated = dict(tokens)
+    updated["access_token"] = access_token
+    # A response without a new refresh token means the old one still stands,
+    # and id_token only moves when the endpoint chooses to reissue it.
+    for key in ("refresh_token", "id_token"):
+        value = _optional_str(response.get(key))
+        if value is not None:
+            updated[key] = value
+
+    if not _swap_auth(auth_path, spent_token, updated, now=now):
+        return None
+    return access_token
+
+
+def _swap_auth(
+    auth_path: Path,
+    spent_token: str,
+    tokens: Mapping[str, Any],
+    *,
+    now: Optional[float] = None,
+) -> bool:
+    """Replace the tokens only while auth.json still holds the one we spent."""
+
+    try:
+        current = json.loads(auth_path.read_text(encoding="utf-8"))
+        if current["tokens"]["refresh_token"] != spent_token:
+            # The codex CLI refreshed while our request was in flight. Its pair
+            # is the live one; ours is already dead. Leave the file alone.
+            return False
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
+
+    current["tokens"] = dict(tokens)
+    # The codex CLI stamps this field itself, so keeping it current means a
+    # refresh of ours is not mistaken for the file having gone stale.
+    current["last_refresh"] = _utc_now()
+    return _write_secret_json(auth_path, current)
+
+
+def _write_secret_json(path: Path, payload: Mapping[str, Any]) -> bool:
+    """Replace a credential file atomically, never widening its permissions.
+
+    The temporary file is created 0600 by open() rather than chmod'ed after the
+    fact, because writing the refresh token into a default-umask file first
+    leaves it world-readable for as long as the write takes.
+    """
+
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(payload, stream, indent=2, sort_keys=True)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    except OSError:
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+        return False
+    return True
+
+
+def _flag_enabled(value: Optional[str]) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _post_json(request: urllib.request.Request, timeout: float) -> dict[str, Any]:
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
 
 
 def fetch_wham_snapshot(
@@ -290,7 +502,7 @@ def _fetch_json(url: str, access_token: str, timeout: float, account_id: Optiona
         "OpenAI-Beta": "codex-1",
         "Referer": "https://chatgpt.com/",
         "originator": "Codex Desktop",
-        "User-Agent": "codex-rate-indicator/1.0",
+        "User-Agent": USER_AGENT,
     }
     if account_id:
         headers["ChatGPT-Account-ID"] = account_id

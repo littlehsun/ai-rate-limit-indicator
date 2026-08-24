@@ -208,6 +208,16 @@ install_manager() {
         printf '\n# local (default), auto, or wham; auto/wham opt in to network polling.\n' >> "$CONFIG_FILE"
         printf 'CODEX_RATE_SOURCE=%s\n' "$legacy_codex_source" >> "$CONFIG_FILE"
     fi
+    if ! has_config_assignment CODEX_AUTO_REFRESH; then
+        printf '\n# true opts in to renewing the Codex OAuth token directly when it\n' >> "$CONFIG_FILE"
+        printf '# has expired, instead of waiting for the codex CLI to run.\n' >> "$CONFIG_FILE"
+        printf 'CODEX_AUTO_REFRESH=false\n' >> "$CONFIG_FILE"
+    fi
+    if ! has_config_assignment CLAUDE_AUTO_REFRESH; then
+        printf '\n# true opts in to renewing the Claude OAuth token directly when it\n' >> "$CONFIG_FILE"
+        printf '# has expired, instead of waiting for Claude Code to run. Linux only.\n' >> "$CONFIG_FILE"
+        printf 'CLAUDE_AUTO_REFRESH=false\n' >> "$CONFIG_FILE"
+    fi
     if ! has_config_assignment GROK_AUTO_REFRESH; then
         printf '\n# true opts in to running `grok models` when the Grok token has\n' >> "$CONFIG_FILE"
         printf '# expired, so the CLI refreshes its own credential.\n' >> "$CONFIG_FILE"

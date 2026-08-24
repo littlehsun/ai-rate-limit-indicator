@@ -392,14 +392,27 @@ def _swap_credentials(
         return False
 
     current["claudeAiOauth"] = dict(updated)
-    temporary = credentials_path.with_name(f".{credentials_path.name}.tmp")
+    return _write_secret_json(credentials_path, current)
+
+
+def _write_secret_json(path: Path, payload: Mapping[str, Any]) -> bool:
+    """Replace a credential file atomically, never widening its permissions.
+
+    The temporary file is created 0600 by open() rather than chmod'ed after the
+    fact, because writing the refresh token into a default-umask file first
+    leaves it world-readable for as long as the write takes. The pid in the name
+    keeps two pollers from picking the same temporary path.
+    """
+
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:
-        temporary.write_text(
-            json.dumps(current, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        temporary.chmod(0o600)
-        os.replace(temporary, credentials_path)
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(payload, stream, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
     except OSError:
         try:
             temporary.unlink()

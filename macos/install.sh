@@ -222,6 +222,13 @@ if ! grep -Eq '^[[:space:]]*(export[[:space:]]+)?CODEX_RATE_SOURCE[[:space:]]*='
     printf '\n# local (default), auto, or wham; auto/wham opt in to network polling.\n' >> "$CONFIG_FILE"
     printf 'CODEX_RATE_SOURCE=%s\n' "$legacy_codex_source" >> "$CONFIG_FILE"
 fi
+if ! grep -Eq '^[[:space:]]*(export[[:space:]]+)?CODEX_AUTO_REFRESH[[:space:]]*=' "$CONFIG_FILE"; then
+    printf '\n# true opts in to renewing the Codex OAuth token directly when it\n' >> "$CONFIG_FILE"
+    printf '# has expired, instead of waiting for the codex CLI to run.\n' >> "$CONFIG_FILE"
+    printf 'CODEX_AUTO_REFRESH=false\n' >> "$CONFIG_FILE"
+fi
+# CLAUDE_AUTO_REFRESH is deliberately absent here: macOS keeps that credential
+# in the Keychain, where the file handling the refresh depends on does not apply.
 if ! grep -Eq '^[[:space:]]*(export[[:space:]]+)?GROK_AUTO_REFRESH[[:space:]]*=' "$CONFIG_FILE"; then
     printf '\n# true opts in to running `grok models` when the Grok token has\n' >> "$CONFIG_FILE"
     printf '# expired, so the CLI refreshes its own credential.\n' >> "$CONFIG_FILE"

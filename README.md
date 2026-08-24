@@ -113,6 +113,13 @@ GEMINI=true
 # to polling undocumented ChatGPT quota endpoints with the existing Codex token.
 CODEX_RATE_SOURCE=local
 
+# true renews Codex's OAuth token when it has expired, by refreshing it against
+# OpenAI's token endpoint and writing the new tokens back to the codex CLI's
+# auth.json. Only the codex CLI refreshes them otherwise, so without this a
+# machine that polls without opening the CLI stops updating. Needs
+# CODEX_RATE_SOURCE=auto or wham; the local source uses no token at all.
+CODEX_AUTO_REFRESH=false
+
 # auto or custom
 DISPLAY_MODE=custom
 
@@ -316,6 +323,22 @@ Back up `~/.claude/.credentials.json` before running commands that touch it.
 Claude Code answers a refresh token it believes is dead by blanking both tokens
 in place, which costs a full `claude auth login`; one credential was lost that
 way while this was being investigated.
+
+`CODEX_AUTO_REFRESH=true` does the same for Codex, against OpenAI's token
+endpoint, writing the new tokens back to `~/.codex/auth.json` under the same two
+rules: the write is a compare-and-swap on the refresh token it spent, and a
+refresh that fails leaves the file untouched. It applies only to the `auto` and
+`wham` sources, since the `local` source reads rollout files and needs no token.
+
+Where the flag is read depends on which poller is installed. The unified
+indicator reads it from `providers.env` above. A standalone Codex install polls
+from `codex-rate-wham-poll.service`, which sources
+`~/.config/codex-rate-indicator/wham.env`, so set it there for that layout.
+
+Both refreshes rewrite a credential another program owns. Neither is a
+substitute for that program: a refresh token has a fixed deadline set at login,
+so once it lapses only a real `codex login` or `claude auth login` brings the
+account back.
 
 ## Testing
 

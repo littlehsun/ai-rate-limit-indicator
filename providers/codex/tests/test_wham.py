@@ -3,11 +3,14 @@ import json
 import os
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
 from codex_rate import format_indicator_label
 from wham import (
+    CLIENT_ID,
+    TOKEN_ENDPOINT,
     describe_missing_token,
     format_reset_credit_lines,
     merge_reset_credits,
@@ -15,6 +18,7 @@ from wham import (
     preserve_cached_reset_credits,
     read_codex_access_token,
     read_wham_snapshot,
+    refresh_access_token,
     resolve_access_token,
     token_is_expired,
     write_wham_snapshot,
@@ -282,6 +286,201 @@ class WhamTests(unittest.TestCase):
 
         self.assertIn("CHATGPT_ACCESS_TOKEN", message)
         self.assertNotIn("expired", message)
+
+
+class WhamRefreshTests(unittest.TestCase):
+    """The refresh has to survive a codex CLI running alongside it."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        self.auth = root / "auth.json"
+        self.auth.write_text(_auth_file(), encoding="utf-8")
+        self.stamp = root / "stamp"
+        env = patch.dict(
+            os.environ,
+            {"CODEX_AUTO_REFRESH": "true", "CODEX_AUTH_FILE": str(self.auth)},
+            clear=True,
+        )
+        env.start()
+        self.addCleanup(env.stop)
+
+    def _stored(self):
+        return json.loads(self.auth.read_text(encoding="utf-8"))
+
+    def test_a_refresh_rotates_the_tokens_and_keeps_the_other_fields(self):
+        captured = {}
+
+        def opener(request, timeout):
+            captured["url"] = request.full_url
+            captured["body"] = dict(
+                pair.split("=", 1)
+                for pair in request.data.decode("utf-8").split("&")
+            )
+            return {
+                "access_token": "at-new",
+                "refresh_token": "rt-new",
+                "id_token": "id-new",
+            }
+
+        token = refresh_access_token(
+            self.auth, opener=opener, stamp_path=self.stamp, now=1_000.0
+        )
+
+        self.assertEqual(token, "at-new")
+        self.assertEqual(captured["url"], TOKEN_ENDPOINT)
+        self.assertEqual(captured["body"]["grant_type"], "refresh_token")
+        self.assertEqual(captured["body"]["client_id"], CLIENT_ID)
+        self.assertEqual(captured["body"]["refresh_token"], "rt-old")
+
+        stored = self._stored()
+        self.assertEqual(stored["tokens"]["access_token"], "at-new")
+        self.assertEqual(stored["tokens"]["refresh_token"], "rt-new")
+        self.assertEqual(stored["tokens"]["id_token"], "id-new")
+        # account_id is what the reset-credit endpoint is addressed with, so
+        # dropping it would cost the panel its expiry rows.
+        self.assertEqual(stored["tokens"]["account_id"], "acct_123")
+        self.assertEqual(stored["auth_mode"], "chatgpt")
+        self.assertNotEqual(stored["last_refresh"], "2026-01-01T00:00:00Z")
+
+    def test_a_response_without_a_new_refresh_token_keeps_the_old_one(self):
+        token = refresh_access_token(
+            self.auth,
+            opener=lambda request, timeout: {"access_token": "at-new"},
+            stamp_path=self.stamp,
+            now=1_000.0,
+        )
+
+        self.assertEqual(token, "at-new")
+        stored = self._stored()["tokens"]
+        self.assertEqual(stored["refresh_token"], "rt-old")
+        self.assertEqual(stored["id_token"], "id-old")
+
+    def test_losing_the_race_leaves_the_cli_credential_alone(self):
+        def opener(request, timeout):
+            # The codex CLI refreshed while our request was in flight. Its pair
+            # is the live one and ours is already dead.
+            self.auth.write_text(
+                _auth_file(refresh_token="rt-from-cli"), encoding="utf-8"
+            )
+            return {"access_token": "at-new", "refresh_token": "rt-new"}
+
+        token = refresh_access_token(
+            self.auth, opener=opener, stamp_path=self.stamp, now=1_000.0
+        )
+
+        self.assertIsNone(token)
+        self.assertEqual(self._stored()["tokens"]["refresh_token"], "rt-from-cli")
+        self.assertEqual(self._stored()["tokens"]["access_token"], "at-old")
+
+    def test_a_failed_refresh_never_blanks_the_credential(self):
+        def opener(request, timeout):
+            raise urllib.error.HTTPError(TOKEN_ENDPOINT, 401, "no", {}, None)
+
+        token = refresh_access_token(
+            self.auth, opener=opener, stamp_path=self.stamp, now=1_000.0
+        )
+
+        self.assertIsNone(token)
+        self.assertEqual(self._stored(), json.loads(_auth_file()))
+
+    def test_the_credential_never_widens_past_owner_only(self):
+        refresh_access_token(
+            self.auth,
+            opener=lambda request, timeout: {"access_token": "at-new"},
+            stamp_path=self.stamp,
+            now=1_000.0,
+        )
+
+        self.assertEqual(self.auth.stat().st_mode & 0o777, 0o600)
+        siblings = [entry.name for entry in self.auth.parent.iterdir()]
+        self.assertEqual([name for name in siblings if name.endswith(".tmp")], [])
+
+    def test_the_flag_argument_beats_the_environment(self):
+        with patch.dict(os.environ, {"CODEX_AUTO_REFRESH": "false"}):
+            token = refresh_access_token(
+                self.auth,
+                opener=lambda request, timeout: {"access_token": "at-new"},
+                stamp_path=self.stamp,
+                now=1_000.0,
+                enabled=True,
+            )
+
+        self.assertEqual(token, "at-new")
+
+    def test_refreshing_is_opt_in(self):
+        with patch.dict(os.environ, {}, clear=True):
+            token = refresh_access_token(
+                self.auth,
+                opener=_unreachable_opener,
+                stamp_path=self.stamp,
+                now=1_000.0,
+            )
+
+        self.assertIsNone(token)
+        self.assertEqual(self._stored(), json.loads(_auth_file()))
+
+    def test_a_recent_attempt_is_not_retried(self):
+        self.stamp.write_text("900.0\n", encoding="utf-8")
+
+        token = refresh_access_token(
+            self.auth,
+            opener=_unreachable_opener,
+            stamp_path=self.stamp,
+            now=1_000.0,
+        )
+
+        self.assertIsNone(token)
+
+    def test_an_expired_token_is_replaced_through_resolve(self):
+        self.auth.write_text(
+            _auth_file(access_token=_jwt(exp=1_000)), encoding="utf-8"
+        )
+
+        with patch(
+            "wham.refresh_access_token", return_value="at-new"
+        ) as refresh:
+            self.assertEqual(
+                resolve_access_token(now=2_000, allow_refresh=True), "at-new"
+            )
+
+        self.assertEqual(refresh.call_args.kwargs["enabled"], True)
+
+    def test_a_live_token_never_triggers_a_refresh(self):
+        self.auth.write_text(
+            _auth_file(access_token=_jwt(exp=9_000)), encoding="utf-8"
+        )
+
+        with patch("wham.refresh_access_token", side_effect=AssertionError) as refresh:
+            self.assertIsNotNone(resolve_access_token(now=2_000, allow_refresh=True))
+
+        refresh.assert_not_called()
+
+
+def _auth_file(
+    refresh_token: str = "rt-old",
+    access_token: str = "at-old",
+) -> str:
+    return json.dumps(
+        {
+            "auth_mode": "chatgpt",
+            "OPENAI_API_KEY": None,
+            "tokens": {
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "id_token": "id-old",
+                "account_id": "acct_123",
+            },
+            "last_refresh": "2026-01-01T00:00:00Z",
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _unreachable_opener(request, timeout):
+    raise AssertionError("the refresh endpoint must not be reached")
 
 
 def _jwt(**claims: int) -> str:
