@@ -27,6 +27,7 @@ from adapters import (  # noqa: E402
 )
 from models import (  # noqa: E402
     ProviderSnapshot,
+    UsageWindow,
     countdown,
     local_reset_time,
     local_updated_time,
@@ -105,6 +106,35 @@ def seven_day_percent(snapshot: ProviderSnapshot) -> Optional[int]:
         if _window_kind(window.id) == "7d"
     ]
     return max(windows) if windows else None
+
+
+# What the panel shows for a provider, in order, when the provider reports more
+# than one window worth showing. Selecting by id rather than by position matters
+# for Antigravity: its snapshot carries two quota groups, and a plain
+# `windows[:2]` slides onto the Claude/GPT group the moment the Gemini group
+# stops reporting its five-hour window.
+PANEL_WINDOW_IDS = {
+    "claude": ("5h", "7d"),
+    "gemini": ("5h", "7d"),
+}
+
+
+def panel_windows(snapshot: ProviderSnapshot) -> tuple[UsageWindow, ...]:
+    """Pick the panel's windows by id, holding a slot for any that are absent."""
+
+    wanted = PANEL_WINDOW_IDS.get(snapshot.provider)
+    if wanted is None:
+        return tuple(snapshot.windows[:2])
+    by_id = {window.id: window for window in snapshot.windows}
+    # A provider that reports none of the expected ids is telling us the map is
+    # wrong for it, and its own first windows beat a row of dashes.
+    if not any(window_id in by_id for window_id in wanted):
+        return tuple(snapshot.windows[:2])
+    return tuple(
+        by_id.get(window_id)
+        or UsageWindow(id=window_id, label=window_id.upper(), used_percent=None)
+        for window_id in wanted
+    )
 
 
 def indicator_reset_window(windows: tuple[UsageWindow, ...]) -> UsageWindow:
@@ -376,18 +406,27 @@ class UnifiedRateIndicator:
         )
 
     def _segments(self, snapshot: ProviderSnapshot) -> list[TextSegment]:
-        windows = snapshot.windows[:2]
+        windows = panel_windows(snapshot)
         if not windows:
             return [("--", "green")]
         segments: list[TextSegment] = []
         for index, window in enumerate(windows):
             if index:
                 segments.append(("|", METRIC_SEPARATOR_COLOR))
+            if window.used_percent is None:
+                segments.append(("--", NEUTRAL_TEXT_COLOR))
+            else:
+                segments.append(
+                    (f"{window.used_percent}%", self._color(window.used_percent))
+                )
+        # A held slot carries no reset of its own, so the countdown has to come
+        # from a window that was actually reported.
+        timed = tuple(window for window in windows if window.resets_at is not None)
+        if timed:
+            constrained = indicator_reset_window(timed)
             segments.append(
-                (f"{window.used_percent}%", self._color(window.used_percent))
+                (f"  ⟳{countdown(constrained.resets_at)}", NEUTRAL_TEXT_COLOR)
             )
-        constrained = indicator_reset_window(windows)
-        segments.append((f"  ⟳{countdown(constrained.resets_at)}", NEUTRAL_TEXT_COLOR))
         return segments
 
     def _rebuild_menu(self, selected: tuple[ProviderSnapshot, ...]) -> None:

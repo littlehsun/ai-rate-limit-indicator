@@ -13,7 +13,10 @@ from typing import Optional
 class UsageWindow:
     id: str
     label: str
-    used_percent: int
+    # None means the backend stopped reporting this window rather than reporting
+    # zero. Antigravity drops a window once its quota is spent, and a nought
+    # there would read as "all of it still available" -- the opposite of true.
+    used_percent: Optional[int]
     resets_at: Optional[int] = None
     detail: Optional[str] = None
 
