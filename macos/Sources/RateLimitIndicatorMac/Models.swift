@@ -55,8 +55,15 @@ struct ProviderSnapshot: Codable, Identifiable, Hashable {
     /// weekly quota filled, Antigravity stopped reporting its five-hour bucket
     /// and the slice slid into the next group — the panel then showed
     /// Claude/GPT's number under Gemini's name, with Claude/GPT's countdown.
+    ///
+    /// Claude is listed even though it reports one group. `_parse_credentials`
+    /// appends its two windows independently and only fails when both are
+    /// absent, so a payload carrying `five_hour` without `seven_day` yields a
+    /// one-window snapshot — and the panel should hold the empty slot there
+    /// too, the way indicator.py already does.
     static let panelWindowIDs: [String: [String]] = [
-        "gemini": ["5h", "7d"]
+        "claude": ["5h", "7d"],
+        "gemini": ["5h", "7d"],
     ]
 
     var indicatorDisplayWindows: [UsageWindow] {
