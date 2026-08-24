@@ -238,9 +238,11 @@ def refresh_access_token(
     The same two rules as claude_oauth.refresh_credentials make that safe to do
     underneath a running codex CLI:
 
-    * The refresh token may rotate. Whoever spends it first invalidates the
-      other copy, so the write is a compare-and-swap -- re-read the file and
-      only replace tokens that still hold the token we spent.
+    * The refresh token rotates. A live exchange against this endpoint returned
+      a new access, refresh and id token together, so whoever spends the pair
+      first invalidates the other copy. The write is therefore a
+      compare-and-swap -- re-read the file and only replace tokens that still
+      hold the token we spent.
     * A refresh that fails must change nothing. Leaving the file exactly as it
       was costs the caller one expired token, which is the state it was already
       reporting; blanking it would cost the user a full `codex login`.
