@@ -3,7 +3,7 @@ import Foundation
 struct UsageWindow: Codable, Identifiable, Hashable {
     let id: String
     let label: String
-    let usedPercent: Int
+    let usedPercent: Int?
     let resetsAt: Int?
     let detail: String?
 
@@ -34,24 +34,52 @@ struct ProviderSnapshot: Codable, Identifiable, Hashable {
     let extras: [String]
 
     var maxUsedPercent: Int {
-        windows.map(\.usedPercent).max() ?? 0
+        windows.compactMap(\.usedPercent).max() ?? 0
     }
 
     var sevenDayPercent: Int? {
-        windows.filter(\.isSevenDay).map(\.usedPercent).max()
+        windows.filter(\.isSevenDay).compactMap(\.usedPercent).max()
     }
 
+    /// The countdown belongs to a window the backend actually reported. A slot
+    /// held open for a window nobody sent has no reset to count down to.
     var indicatorResetWindow: UsageWindow? {
-        indicatorDisplayWindows.min {
-            $0.quotaCadenceRank < $1.quotaCadenceRank
-        }
+        indicatorDisplayWindows
+            .filter { $0.usedPercent != nil && $0.resetsAt != nil }
+            .min { $0.quotaCadenceRank < $1.quotaCadenceRank }
     }
+
+    /// Providers that report more than one quota group, and the two windows the
+    /// panel shows for them. Antigravity sends a Gemini group and a Claude/GPT
+    /// one; taking the first two windows positionally meant that when Gemini's
+    /// weekly quota filled, Antigravity stopped reporting its five-hour bucket
+    /// and the slice slid into the next group — the panel then showed
+    /// Claude/GPT's number under Gemini's name, with Claude/GPT's countdown.
+    static let panelWindowIDs: [String: [String]] = [
+        "gemini": ["5h", "7d"]
+    ]
 
     var indicatorDisplayWindows: [UsageWindow] {
+        if let wanted = Self.panelWindowIDs[provider] {
+            // A window whose quota is spent disappears from the payload
+            // entirely, so the slot is held open rather than letting the row
+            // shorten and every number beside it shift.
+            return wanted.map { id in
+                windows.first { $0.id == id }
+                    ?? UsageWindow(
+                        id: id,
+                        label: id.uppercased(),
+                        usedPercent: nil,
+                        resetsAt: nil,
+                        detail: nil
+                    )
+            }
+        }
+
         var displayed = Array(windows.prefix(2))
         guard let strongestSevenDay = windows
             .filter(\.isSevenDay)
-            .max(by: { $0.usedPercent < $1.usedPercent }),
+            .max(by: { ($0.usedPercent ?? -1) < ($1.usedPercent ?? -1) }),
               !displayed.contains(strongestSevenDay) else {
             return displayed
         }
@@ -95,6 +123,14 @@ enum ProviderCatalog {
 }
 
 enum UsageFormatting {
+    /// A window the backend did not report has no percentage. "--" says so;
+    /// "0%" would claim the quota is untouched when in fact it is spent, which
+    /// is exactly when Antigravity stops reporting a window.
+    static func percent(_ value: Int?) -> String {
+        guard let value else { return "--" }
+        return "\(value)%"
+    }
+
     static func countdown(to timestamp: Int?, now: Date = Date()) -> String {
         guard let timestamp else { return "--" }
         let seconds = timestamp - Int(now.timeIntervalSince1970)

@@ -612,7 +612,11 @@ class UnifiedMacOSTests(unittest.TestCase):
         self.assertIn("UsageFormatting.countdown(to: resetWindow.resetsAt)", views)
         self.assertIn("NSMutableAttributedString()", views)
         self.assertIn(".filter(\\.isSevenDay)", views)
-        self.assertIn(".max(by: { $0.usedPercent < $1.usedPercent })", views)
+        # usedPercent is optional now, because a window the backend stopped
+        # reporting holds its slot with no number.
+        self.assertIn(
+            ".max(by: { ($0.usedPercent ?? -1) < ($1.usedPercent ?? -1) })", views
+        )
         self.assertIn("snapshot.indicatorResetWindow", views)
         self.assertIn("snapshot.indicatorDisplayWindows", views)
         self.assertIn('snapshot.status == "stale" ? "~" : ""', views)

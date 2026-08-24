@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 
 private enum UsageColor {
-    static func color(for value: Int) -> Color {
+    static func color(for value: Int?) -> Color {
+        guard let value else { return .secondary }
         if value >= 90 { return Color(red: 1.0, green: 0.33, blue: 0.33) }
         if value >= 70 { return Color(red: 1.0, green: 0.72, blue: 0.18) }
         return Color(red: 0.0, green: 0.69, blue: 0.31)
@@ -128,7 +129,7 @@ private enum MenuBarCompositeImage {
                 return "\(snapshot.label): no data"
             }
             let stale = snapshot.status == "stale" ? "cached " : ""
-            return "\(snapshot.label): \(stale)\(window.usedPercent)%"
+            return "\(snapshot.label): \(stale)\(UsageFormatting.percent(window.usedPercent))"
         }.joined(separator: ", ")
     }
 
@@ -153,7 +154,7 @@ private enum MenuBarCompositeImage {
                 ))
             }
             text.append(NSAttributedString(
-                string: "\(index == 0 ? stale : "")\(window.usedPercent)%",
+                string: "\(index == 0 ? stale : "")\(UsageFormatting.percent(window.usedPercent))",
                 attributes: textAttributes(color: usageColor(for: window.usedPercent))
             ))
         }
@@ -172,7 +173,7 @@ private enum MenuBarCompositeImage {
     private static func primaryWindow(_ snapshot: ProviderSnapshot) -> UsageWindow? {
         snapshot.windows
             .filter(\.isSevenDay)
-            .max(by: { $0.usedPercent < $1.usedPercent })
+            .max(by: { ($0.usedPercent ?? -1) < ($1.usedPercent ?? -1) })
             ?? snapshot.windows.first
     }
 
@@ -194,7 +195,8 @@ private enum MenuBarCompositeImage {
         ]
     }
 
-    private static func usageColor(for value: Int) -> NSColor {
+    private static func usageColor(for value: Int?) -> NSColor {
+        guard let value else { return .secondaryLabelColor }
         if value >= 90 { return NSColor(calibratedRed: 1, green: 0.33, blue: 0.33, alpha: 1) }
         if value >= 70 { return NSColor(calibratedRed: 1, green: 0.72, blue: 0.18, alpha: 1) }
         return NSColor(calibratedRed: 0, green: 0.69, blue: 0.31, alpha: 1)
@@ -221,7 +223,7 @@ private struct ProviderStatusLabel: View {
                         Text("|")
                             .foregroundStyle(.gray)
                     }
-                    Text("\(index == 0 ? stalePrefix : "")\(window.usedPercent)%")
+                    Text("\(index == 0 ? stalePrefix : "")\(UsageFormatting.percent(window.usedPercent))")
                         .foregroundStyle(UsageColor.color(for: window.usedPercent))
                         .monospacedDigit()
                 }
@@ -377,9 +379,9 @@ private struct ProviderSectionView: View {
                         .foregroundStyle(window.isSevenDay || window.id == "monthly" ? Color.gray : Color.yellow)
                     Text("\(window.label):")
                     if let detail = window.detail {
-                        Text("\(detail) (\(window.usedPercent)%)")
+                        Text("\(detail) (\(UsageFormatting.percent(window.usedPercent)))")
                     } else {
-                        Text("\(window.usedPercent)%")
+                        Text(UsageFormatting.percent(window.usedPercent))
                             .foregroundStyle(UsageColor.color(for: window.usedPercent))
                     }
                     if window.resetsAt != nil {

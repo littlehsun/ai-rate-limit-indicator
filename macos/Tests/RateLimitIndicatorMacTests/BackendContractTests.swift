@@ -311,16 +311,13 @@ final class BackendContractTests: XCTestCase {
     }
 
     func testSevenDayPercentUsesLargestMatchingWindow() {
-        let snapshot = snapshot(
+        let snapshot = ProviderSnapshot(
             provider: "gemini",
+            label: "Gemini",
+            updatedAt: nil,
             windows: [
-                UsageWindow(
-                    id: "7d",
-                    label: "Gemini 7D",
-                    usedPercent: 12,
-                    resetsAt: nil,
-                    detail: nil
-                ),
+                UsageWindow(id: "5h", label: "Gemini 5H", usedPercent: 4, resetsAt: nil, detail: nil),
+                UsageWindow(id: "7d", label: "Gemini 7D", usedPercent: 12, resetsAt: nil, detail: nil),
                 UsageWindow(
                     id: "claude-gpt-7d",
                     label: "Claude/GPT 7D",
@@ -328,49 +325,71 @@ final class BackendContractTests: XCTestCase {
                     resetsAt: nil,
                     detail: nil
                 ),
-            ]
+            ],
+            status: "fresh",
+            error: nil,
+            extras: []
         )
 
+        // sevenDayPercent answers "the worst weekly number anywhere", which is
+        // Claude/GPT's, and stays independent of what the panel chooses to show.
         XCTAssertEqual(snapshot.sevenDayPercent, 47)
-        XCTAssertTrue(snapshot.indicatorDisplayWindows.contains {
-            $0.id == "claude-gpt-7d"
-        })
-        XCTAssertLessThanOrEqual(snapshot.indicatorDisplayWindows.count, 2)
+        XCTAssertEqual(snapshot.indicatorDisplayWindows.map(\.id), ["5h", "7d"])
     }
 
-    func testResetWindowAlwaysComesFromDisplayedWindows() {
-        let hiddenFiveHour = UsageWindow(
-            id: "claude-gpt-5h",
-            label: "Claude/GPT 5H",
-            usedPercent: 8,
-            resetsAt: 100,
-            detail: nil
-        )
-        let snapshot = snapshot(
+    func testPanelKeepsOneQuotaGroupWhenAWindowStopsBeingReported() {
+        // Antigravity drops a window once its quota is spent. Taking the first
+        // two windows positionally then slid into the Claude/GPT group, so the
+        // panel showed that group's number under Gemini's name and counted down
+        // to its reset.
+        let snapshot = ProviderSnapshot(
             provider: "gemini",
+            label: "Gemini",
+            updatedAt: nil,
             windows: [
+                UsageWindow(id: "7d", label: "Gemini 7D", usedPercent: 100, resetsAt: 900, detail: nil),
                 UsageWindow(
-                    id: "7d",
-                    label: "Gemini 7D",
-                    usedPercent: 12,
-                    resetsAt: 200,
+                    id: "claude-gpt-5h",
+                    label: "Claude/GPT 5H",
+                    usedPercent: 8,
+                    resetsAt: 100,
                     detail: nil
                 ),
-                hiddenFiveHour,
-                UsageWindow(
-                    id: "claude-gpt-7d",
-                    label: "Claude/GPT 7D",
-                    usedPercent: 47,
-                    resetsAt: 300,
-                    detail: nil
-                ),
-            ]
+            ],
+            status: "fresh",
+            error: nil,
+            extras: []
         )
 
-        XCTAssertFalse(snapshot.indicatorDisplayWindows.contains(hiddenFiveHour))
-        XCTAssertTrue(snapshot.indicatorDisplayWindows.contains {
-            $0 == snapshot.indicatorResetWindow
-        })
+        let displayed = snapshot.indicatorDisplayWindows
+        XCTAssertEqual(displayed.map(\.id), ["5h", "7d"])
+        // The absent window holds its slot without inventing a number for it.
+        XCTAssertNil(displayed[0].usedPercent)
+        XCTAssertEqual(displayed[1].usedPercent, 100)
+        XCTAssertFalse(displayed.contains { $0.id == "claude-gpt-5h" })
+
+        // The countdown comes from a window that was actually reported, so it
+        // cannot be borrowed from the group the panel is not showing.
+        XCTAssertEqual(snapshot.indicatorResetWindow?.id, "7d")
+    }
+
+    func testResetWindowComesFromADisplayedReportedWindow() {
+        let snapshot = ProviderSnapshot(
+            provider: "claude",
+            label: "Claude",
+            updatedAt: nil,
+            windows: [
+                UsageWindow(id: "5h", label: "5H", usedPercent: 28, resetsAt: 100, detail: nil),
+                UsageWindow(id: "7d", label: "7D", usedPercent: 3, resetsAt: 900, detail: nil),
+            ],
+            status: "fresh",
+            error: nil,
+            extras: []
+        )
+
+        let reset = snapshot.indicatorResetWindow
+        XCTAssertEqual(reset?.id, "5h")
+        XCTAssertTrue(snapshot.indicatorDisplayWindows.contains { $0 == reset })
     }
 
     func testLoginApprovalErrorExplainsRecovery() {
