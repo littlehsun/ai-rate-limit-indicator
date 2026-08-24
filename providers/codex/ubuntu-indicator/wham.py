@@ -26,6 +26,7 @@ TOKEN_ENDPOINT = "https://auth.openai.com/oauth/token"
 CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 USER_AGENT = "codex-rate-indicator/1.0"
 TOKEN_EXPIRY_LEEWAY_SECONDS = 60
+REFRESH_LEAD_SECONDS = 300
 REFRESH_COOLDOWN = 300.0
 REFRESH_TIMEOUT = 30.0
 
@@ -48,11 +49,21 @@ def resolve_access_token(
     for candidate in (
         _optional_str(os.environ.get("CHATGPT_ACCESS_TOKEN")),
         _optional_str(os.environ.get("CHATGPT_BEARER_TOKEN")),
-        read_codex_access_token(default_codex_auth_path()),
     ):
-        # An expired token only earns a 401 on every poll.
+        # An expired token only earns a 401 on every poll. These two are the
+        # user's own overrides, and nothing here can renew them.
         if candidate is not None and not token_is_expired(candidate, now=now):
             return candidate
+
+    stored = read_codex_access_token(default_codex_auth_path())
+    if stored is not None and not token_is_expired(stored, now=now):
+        if not token_expires_soon(stored, now=now):
+            return stored
+        # Still usable, but a token that lapses between this call and the
+        # request costs a whole poll. Renewing early closes that window, and a
+        # refresh that fails leaves the token we already hold in place.
+        return refresh_access_token(enabled=allow_refresh, now=now) or stored
+
     # Nothing on hand is usable. The codex CLI is the usual thing that renews
     # auth.json, and on a machine where it never runs nothing does, so mint a
     # token ourselves when the user has opted in.
@@ -87,6 +98,21 @@ def token_is_expired(token: str, *, now: Optional[int] = None) -> bool:
         return False
     now = int(time.time()) if now is None else now
     return expires_at <= now + TOKEN_EXPIRY_LEEWAY_SECONDS
+
+
+def token_expires_soon(token: str, *, now: Optional[int] = None) -> bool:
+    """Report whether a still-usable token is close enough to expiry to renew.
+
+    A token that outlives this call but not the request it authorises fails the
+    poll anyway, so the lead time is the cheapest way to never see that. As with
+    expiry, a token that cannot prove its own deadline is left alone.
+    """
+
+    expires_at = _jwt_expiry(token)
+    if expires_at is None:
+        return False
+    now = int(time.time()) if now is None else now
+    return expires_at <= now + REFRESH_LEAD_SECONDS
 
 
 def describe_missing_token(path: Optional[Path] = None) -> str:
@@ -327,12 +353,33 @@ def fetch_wham_snapshot(
     usage_url: str = USAGE_URL,
     reset_credits_url: str = RESET_CREDITS_URL,
     timeout: float = 10.0,
+    *,
+    allow_refresh: Optional[bool] = None,
 ) -> CodexRateSnapshot:
-    usage = _fetch_json(
-        usage_url,
-        access_token=access_token,
-        timeout=timeout,
-    )
+    try:
+        usage = _fetch_json(
+            usage_url,
+            access_token=access_token,
+            timeout=timeout,
+        )
+    except urllib.error.HTTPError as exc:
+        # The token's own `exp` said it was live, so it is not the whole story:
+        # a revoked or already-rotated token is refused exactly like this. One
+        # refresh is worth the request, and the cooldown keeps a token that
+        # stays refused from earning one on every tick.
+        refreshed = (
+            refresh_access_token(enabled=allow_refresh)
+            if exc.code in (401, 403)
+            else None
+        )
+        if refreshed is None or refreshed == access_token:
+            raise
+        access_token = refreshed
+        usage = _fetch_json(
+            usage_url,
+            access_token=access_token,
+            timeout=timeout,
+        )
     snapshot = parse_usage_response(usage)
     if snapshot is None:
         raise RuntimeError("wham usage response did not include usable rate limits")

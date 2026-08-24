@@ -12,6 +12,7 @@ from wham import (
     CLIENT_ID,
     TOKEN_ENDPOINT,
     describe_missing_token,
+    fetch_wham_snapshot,
     format_reset_credit_lines,
     merge_reset_credits,
     parse_usage_response,
@@ -20,6 +21,7 @@ from wham import (
     read_wham_snapshot,
     refresh_access_token,
     resolve_access_token,
+    token_expires_soon,
     token_is_expired,
     write_wham_snapshot,
 )
@@ -454,6 +456,139 @@ class WhamRefreshTests(unittest.TestCase):
 
         with patch("wham.refresh_access_token", side_effect=AssertionError) as refresh:
             self.assertIsNotNone(resolve_access_token(now=2_000, allow_refresh=True))
+
+        refresh.assert_not_called()
+
+
+class WhamEarlyRenewalTests(unittest.TestCase):
+    """A token that lapses mid-request costs a poll, so renew before it does."""
+
+    def test_a_token_close_to_expiry_is_renewed_while_still_usable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            auth_path = Path(tmp) / "auth.json"
+            # Live for another 100s, which outlasts this call and may not
+            # outlast the request it is about to authorise.
+            auth_path.write_text(
+                json.dumps({"tokens": {"access_token": _jwt(exp=2_100)}}),
+                encoding="utf-8",
+            )
+
+            env = {"CODEX_AUTH_FILE": str(auth_path)}
+            with patch.dict(os.environ, env, clear=True), patch(
+                "wham.refresh_access_token", return_value="at-new"
+            ):
+                self.assertEqual(
+                    resolve_access_token(now=2_000, allow_refresh=True), "at-new"
+                )
+
+    def test_a_failed_early_renewal_keeps_the_token_we_already_have(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            auth_path = Path(tmp) / "auth.json"
+            token = _jwt(exp=2_100)
+            auth_path.write_text(
+                json.dumps({"tokens": {"access_token": token}}), encoding="utf-8"
+            )
+
+            env = {"CODEX_AUTH_FILE": str(auth_path)}
+            with patch.dict(os.environ, env, clear=True), patch(
+                "wham.refresh_access_token", return_value=None
+            ):
+                # Downgrading a working token because the renewal failed would
+                # turn a successful poll into a blank panel.
+                self.assertEqual(
+                    resolve_access_token(now=2_000, allow_refresh=True), token
+                )
+
+    def test_a_token_with_hours_left_is_left_alone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            auth_path = Path(tmp) / "auth.json"
+            token = _jwt(exp=9_000)
+            auth_path.write_text(
+                json.dumps({"tokens": {"access_token": token}}), encoding="utf-8"
+            )
+
+            env = {"CODEX_AUTH_FILE": str(auth_path)}
+            with patch.dict(os.environ, env, clear=True), patch(
+                "wham.refresh_access_token", side_effect=AssertionError
+            ) as refresh:
+                self.assertEqual(
+                    resolve_access_token(now=2_000, allow_refresh=True), token
+                )
+
+            refresh.assert_not_called()
+
+    def test_an_opaque_token_is_never_renewed_early(self):
+        # Nothing proves its deadline, so renewing would be a guess.
+        self.assertFalse(token_expires_soon("token-from-env", now=2_000))
+        self.assertFalse(token_expires_soon(_jwt(), now=2_000))
+
+
+class WhamUnauthorizedRetryTests(unittest.TestCase):
+    """`exp` is not the whole story: a revoked token also answers 401."""
+
+    def setUp(self):
+        self.usage = {
+            "account_id": "acct_123",
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 10,
+                    "limit_window_seconds": 604800,
+                    "reset_at": "2026-07-01T08:00:00Z",
+                }
+            },
+        }
+
+    def test_a_rejected_token_is_refreshed_and_the_request_retried(self):
+        calls = []
+
+        def fetch(url, access_token, timeout, account_id=None):
+            calls.append(access_token)
+            if access_token == "at-old":
+                raise urllib.error.HTTPError(url, 401, "no", {}, None)
+            return self.usage
+
+        with patch("wham._fetch_json", side_effect=fetch), patch(
+            "wham.refresh_access_token", return_value="at-new"
+        ):
+            snapshot = fetch_wham_snapshot("at-old", allow_refresh=True)
+
+        self.assertEqual(calls[:2], ["at-old", "at-new"])
+        self.assertEqual(snapshot.weekly.used_percent, 10)
+
+    def test_a_rejection_that_survives_the_refresh_is_reported(self):
+        def fetch(url, access_token, timeout, account_id=None):
+            raise urllib.error.HTTPError(url, 401, "no", {}, None)
+
+        with patch("wham._fetch_json", side_effect=fetch), patch(
+            "wham.refresh_access_token", return_value=None
+        ):
+            with self.assertRaises(urllib.error.HTTPError):
+                fetch_wham_snapshot("at-old", allow_refresh=True)
+
+    def test_the_same_token_back_from_a_refresh_is_not_retried(self):
+        calls = []
+
+        def fetch(url, access_token, timeout, account_id=None):
+            calls.append(access_token)
+            raise urllib.error.HTTPError(url, 403, "no", {}, None)
+
+        with patch("wham._fetch_json", side_effect=fetch), patch(
+            "wham.refresh_access_token", return_value="at-old"
+        ):
+            with self.assertRaises(urllib.error.HTTPError):
+                fetch_wham_snapshot("at-old", allow_refresh=True)
+
+        self.assertEqual(calls, ["at-old"])
+
+    def test_a_failure_that_is_not_about_the_token_never_refreshes(self):
+        def fetch(url, access_token, timeout, account_id=None):
+            raise urllib.error.HTTPError(url, 500, "boom", {}, None)
+
+        with patch("wham._fetch_json", side_effect=fetch), patch(
+            "wham.refresh_access_token", side_effect=AssertionError
+        ) as refresh:
+            with self.assertRaises(urllib.error.HTTPError):
+                fetch_wham_snapshot("at-old", allow_refresh=True)
 
         refresh.assert_not_called()
 
