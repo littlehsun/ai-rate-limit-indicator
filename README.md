@@ -335,6 +335,12 @@ indicator reads it from `providers.env` above. A standalone Codex install polls
 from `codex-rate-wham-poll.service`, which sources
 `~/.config/codex-rate-indicator/wham.env`, so set it there for that layout.
 
+The Codex refresh declines to run at all when `~/.codex/auth.json` is readable
+beyond its owner, and the panel says so instead. The codex CLI writes that file
+`0600`, so a wider mode means something else put it there -- copying it from
+another machine by hand is the usual way. Reading an existing token still
+works; only minting a new one into a file other accounts can see is refused.
+
 Both refreshes rewrite a credential another program owns. Neither is a
 substitute for that program: a refresh token has a fixed deadline set at login,
 so once it lapses only a real `codex login` or `claude auth login` brings the

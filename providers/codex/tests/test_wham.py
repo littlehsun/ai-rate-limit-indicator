@@ -11,6 +11,7 @@ from codex_rate import format_indicator_label
 from wham import (
     CLIENT_ID,
     TOKEN_ENDPOINT,
+    describe_exposed_auth_file,
     describe_missing_token,
     fetch_wham_snapshot,
     format_reset_credit_lines,
@@ -245,6 +246,8 @@ class WhamTests(unittest.TestCase):
                 json.dumps({"tokens": {"access_token": _jwt(exp=1_000)}}),
                 encoding="utf-8",
             )
+            # Owner-only, so expiry is the only thing left to report.
+            auth_path.chmod(0o600)
 
             with patch.dict(os.environ, {"CODEX_AUTH_FILE": str(auth_path)}, clear=True):
                 self.assertIsNone(resolve_access_token(now=2_000))
@@ -299,6 +302,10 @@ class WhamRefreshTests(unittest.TestCase):
         root = Path(self._tmp.name)
         self.auth = root / "auth.json"
         self.auth.write_text(_auth_file(), encoding="utf-8")
+        # The codex CLI writes this 0600 and the refresh declines anything
+        # wider, so a fixture left at the test runner's umask would never
+        # reach the code under test.
+        self.auth.chmod(0o600)
         self.stamp = root / "stamp"
         env = patch.dict(
             os.environ,
@@ -458,6 +465,74 @@ class WhamRefreshTests(unittest.TestCase):
             self.assertIsNotNone(resolve_access_token(now=2_000, allow_refresh=True))
 
         refresh.assert_not_called()
+
+
+class WhamAuthFilePermissionTests(unittest.TestCase):
+    """A credential other accounts can read must not be handed a new token."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.auth = Path(self._tmp.name) / "auth.json"
+        self.auth.write_text(_auth_file(), encoding="utf-8")
+        self.auth.chmod(0o600)
+
+    def test_an_owner_only_credential_is_not_flagged(self):
+        self.assertIsNone(describe_exposed_auth_file(self.auth))
+
+    def test_a_world_readable_credential_is_named_with_its_mode(self):
+        self.auth.chmod(0o644)
+
+        message = describe_exposed_auth_file(self.auth)
+
+        self.assertIn("644", message)
+        self.assertIn("chmod 600", message)
+        # The message reaches a panel and a log, so it must carry no secret.
+        self.assertNotIn("rt-old", message)
+
+    def test_a_group_readable_credential_is_flagged_too(self):
+        self.auth.chmod(0o640)
+
+        self.assertIsNotNone(describe_exposed_auth_file(self.auth))
+
+    def test_a_missing_credential_is_not_a_permission_problem(self):
+        self.assertIsNone(
+            describe_exposed_auth_file(Path(self._tmp.name) / "missing.json")
+        )
+
+    def test_an_exposed_credential_is_never_refreshed(self):
+        self.auth.chmod(0o644)
+
+        token = refresh_access_token(
+            self.auth,
+            opener=_unreachable_opener,
+            stamp_path=Path(self._tmp.name) / "stamp",
+            now=1_000.0,
+            enabled=True,
+        )
+
+        self.assertIsNone(token)
+        self.assertEqual(self._read(), json.loads(_auth_file()))
+
+    def test_an_exposed_credential_explains_itself_before_expiry_does(self):
+        self.auth.write_text(
+            _auth_file(access_token=_jwt(exp=1_000)), encoding="utf-8"
+        )
+        self.auth.chmod(0o644)
+
+        message = describe_missing_token(self.auth)
+
+        self.assertIn("chmod 600", message)
+
+    def test_reading_an_exposed_credential_still_works(self):
+        # Blanking the panel over a mode this code never set would cost the
+        # user their numbers for a problem they can still see reported.
+        self.auth.chmod(0o644)
+
+        self.assertEqual(read_codex_access_token(self.auth), "at-old")
+
+    def _read(self):
+        return json.loads(self.auth.read_text(encoding="utf-8"))
 
 
 class WhamEarlyRenewalTests(unittest.TestCase):

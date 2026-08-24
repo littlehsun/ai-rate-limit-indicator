@@ -115,10 +115,35 @@ def token_expires_soon(token: str, *, now: Optional[int] = None) -> bool:
     return expires_at <= now + REFRESH_LEAD_SECONDS
 
 
+def describe_exposed_auth_file(path: Optional[Path] = None) -> Optional[str]:
+    """Report a credential other local accounts can reach, or None when it is not.
+
+    The codex CLI writes auth.json 0600, so a wider mode means something else
+    put it there -- a hand copy from another machine is the usual way.
+    """
+
+    auth_path = path or default_codex_auth_path()
+    try:
+        mode = auth_path.stat().st_mode & 0o777
+    except OSError:
+        return None
+    if not mode & 0o077:
+        return None
+    return (
+        f"{auth_path} is readable beyond its owner ({mode:o}); "
+        f"run chmod 600 {auth_path}"
+    )
+
+
 def describe_missing_token(path: Optional[Path] = None) -> str:
     """Explain why polling has no usable token, without echoing the token."""
 
     auth_path = path or default_codex_auth_path()
+    exposed = describe_exposed_auth_file(auth_path)
+    if exposed is not None:
+        # This is why the refresh declined, so it explains the panel better
+        # than the expiry does.
+        return exposed
     token = read_codex_access_token(auth_path)
     if token is not None and token_is_expired(token):
         # The refresh token usually outlives the access token, so running the
@@ -230,6 +255,15 @@ def refresh_access_token(
         return None
 
     auth_path = path or default_codex_auth_path()
+    # Minting a fresh refresh token into a file other accounts can read hands
+    # them a live credential. The atomic write would tighten the mode on its
+    # way past, but only after the new token had already been sitting where
+    # they could see it, so decline until one chmod has fixed it. Reading an
+    # existing token is left alone: refusing that would blank a panel over a
+    # mode this never set.
+    if describe_exposed_auth_file(auth_path) is not None:
+        return None
+
     try:
         payload = json.loads(auth_path.read_text(encoding="utf-8"))
         tokens = payload["tokens"]
