@@ -46,8 +46,14 @@ python3 usage_monitor.py --once               # render once and exit
 python3 usage_monitor.py --json               # machine-readable
 python3 usage_monitor.py --providers codex,claude
 python3 usage_monitor.py --theme nord --language en
-python3 usage_monitor.py --endpoint http://100.98.74.38:8477/usage.json
+python3 usage_monitor.py --endpoint http://100.x.y.z:8477/usage.json
 ```
+
+`100.x.y.z` stands in for your publisher's own Tailscale address — `tailscale ip
+-4` on the machine running `publish.py` prints it. Like `mobile/usage-widget.js`,
+this file is public, so it carries no real host. Note that a machine shared
+across tailnets has a different IPv4 in each one, so the address a phone should
+use is the one that tailnet sees, not the one the publisher prints for itself.
 
 Ten themes, `zh-TW` and `en`. See **Themes** below.
 
