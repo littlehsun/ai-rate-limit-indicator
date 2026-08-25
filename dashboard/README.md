@@ -11,6 +11,7 @@ dashboard/
 ├── usage_monitor.py   terminal monitor + the shared data layer
 ├── usage_web.py       the same data as a web page
 ├── config.ini         endpoint, theme, language, per-provider switches
+├── themes/            palettes, loaded through themes.ini
 └── tests/
 ```
 
@@ -48,8 +49,7 @@ python3 usage_monitor.py --theme nord --language en
 python3 usage_monitor.py --endpoint http://100.98.74.38:8477/usage.json
 ```
 
-Six themes carried over unchanged from `codex-usage-monitor`: `dracula` (default),
-`nord`, `gruvbox`, `tokyo-night`, `solarized-dark`, `monochrome`. `zh-TW` and `en`.
+Ten themes, `zh-TW` and `en`. See **Themes** below.
 
 ## Web
 
@@ -73,6 +73,47 @@ often offline-ish, and a CDN round trip is exactly what leaves it blank.
 
 Every tab and widget pointed at one server shares a single snapshot behind a 20s
 TTL, so ten viewers cost the publisher one request rather than ten.
+
+## Themes
+
+Palettes are files, not code. `themes/themes.ini` is the only entry point: it
+names the files rather than holding the colours, so adding a palette means
+dropping an `.ini` beside it and listing it — nobody edits a theme somebody else
+wrote, and nobody merges a file everybody touches.
+
+```
+dashboard/themes/
+├── themes.ini            the index; every palette is loaded through this
+├── dracula.ini           default
+├── nord.ini              tokyo-night.ini      catppuccin-mocha.ini
+├── gruvbox.ini           solarized-dark.ini   one-dark.ini
+├── monochrome.ini        solarized-light.ini  catppuccin-latte.ini
+└── custom.ini            yours; ships empty
+```
+
+`python3 usage_monitor.py --list-themes` prints what loaded, marking the current
+one. `--theme NAME`, `--themes /path/to/themes.ini`, or `?theme=NAME` on the web
+view.
+
+Eleven keys, all required. There is no derivation and nothing is optional,
+because the ten shipped files are the reference: copy the closest one and change
+the values. `custom.ini` carries the full list with a note on what each key
+paints. An entry whose keys are all still blank is treated as an untouched
+template and skipped, which is why `custom.ini` can stay listed in `themes.ini`
+until you fill it in. A partly filled one is an error naming the keys you missed.
+
+A later entry in `themes.ini` redefining an earlier name wins, so a shipped
+theme is overridden by adding a file, never by editing the original.
+
+Two of the ten are light — `solarized-light` and `catppuccin-latte`. They work
+because the web view takes its background from the palette rather than from
+`prefers-color-scheme`: the theme decides light or dark, not the system. The
+terminal view ignores `background`, `surface`, `border` and `text` entirely,
+since a terminal supplies its own background.
+
+The iOS widget does not read these files. It runs in Scriptable on a phone with
+no access to this machine, so its dracula palette is written into
+`mobile/usage-widget.js` directly and has to be changed there.
 
 ## Per-provider switches
 
@@ -105,7 +146,7 @@ track; the label beside it is what tells the two apart.
 cd dashboard && PYTHONPATH="$PWD" python3 -m unittest discover -s tests
 ```
 
-33 tests, no network: the fetch layer takes an injected opener.
+42 tests, no network: the fetch layer takes an injected opener.
 
 ## Known gaps
 

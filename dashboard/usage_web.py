@@ -24,18 +24,19 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Optional, Sequence, Tuple
+from typing import Dict, Optional, Sequence, Tuple
 
 from usage_monitor import (
     DANGER_PERCENT,
     LANGUAGES,
     PROVIDER_ORDER,
-    THEMES,
+    load_themes,
     WARNING_PERCENT,
     MonitorError,
     Settings,
     Snapshot,
     SnapshotClient,
+    Theme,
     default_config_path,
     load_settings,
     snapshot_as_json,
@@ -116,6 +117,10 @@ def resolve_providers(raw: Optional[str], configured: Sequence[str]) -> Tuple[st
 class DashboardHandler(BaseHTTPRequestHandler):
     cache: SnapshotCache
     settings: Settings
+    # Loaded once at bind time rather than per request: themes.ini names a
+    # dozen files, and re-reading them on every widget poll would turn a colour
+    # scheme into disk traffic.
+    themes: Dict[str, Theme]
     server_version = "RateLimitDashboard"
     sys_version = ""
 
@@ -131,7 +136,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if language not in LANGUAGES:
                 language = type(self).settings.language
             theme = (query.get("theme") or [type(self).settings.theme])[0]
-            if theme not in THEMES:
+            if theme not in type(self).themes:
                 theme = type(self).settings.theme
             compact = (query.get("view") or [""])[0] == "compact"
             self._send(
@@ -141,6 +146,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     providers=providers,
                     language=language,
                     theme=theme,
+                    themes=type(self).themes,
                     compact=compact,
                     interval=type(self).settings.interval,
                 ).encode("utf-8"),
@@ -183,9 +189,11 @@ def render_page(
     theme: str,
     compact: bool,
     interval: int,
+    themes: Optional[Dict[str, Theme]] = None,
 ) -> str:
     text = WEB_STRINGS[language]
-    palette = THEMES[theme]
+    available = themes if themes is not None else load_themes()
+    palette = available[theme]
     config = {
         "providers": list(providers),
         "interval": max(10, interval),
@@ -505,7 +513,11 @@ def serve(
     handler = type(
         "BoundDashboardHandler",
         (DashboardHandler,),
-        {"cache": SnapshotCache(snapshot_client), "settings": settings},
+        {
+            "cache": SnapshotCache(snapshot_client),
+            "settings": settings,
+            "themes": load_themes(settings.themes_file),
+        },
     )
     return ThreadingHTTPServer((address, port), handler)
 
@@ -524,6 +536,7 @@ def main() -> int:
         clear=configured.clear,
         timeout=configured.timeout,
         cache_file=configured.cache_file,
+        themes_file=configured.themes_file,
     )
 
     try:

@@ -129,86 +129,94 @@ class Theme:
     text: str
 
 
-THEMES: Dict[str, Theme] = {
-    "dracula": Theme(
-        heading="#BD93F9",
-        accent="#8BE9FD",
-        muted="#6272A4",
-        good="#50FA7B",
-        warning="#FFB86C",
-        danger="#FF5555",
-        empty="#44475A",
-        background="#282A36",
-        surface="#343746",
-        border="#44475A",
-        text="#F8F8F2",
-    ),
-    "nord": Theme(
-        heading="#B48EAD",
-        accent="#88C0D0",
-        muted="#4C566A",
-        good="#A3BE8C",
-        warning="#EBCB8B",
-        danger="#BF616A",
-        empty="#3B4252",
-        background="#2E3440",
-        surface="#3B4252",
-        border="#434C5E",
-        text="#ECEFF4",
-    ),
-    "gruvbox": Theme(
-        heading="#D3869B",
-        accent="#83A598",
-        muted="#928374",
-        good="#B8BB26",
-        warning="#FABD2F",
-        danger="#FB4934",
-        empty="#504945",
-        background="#282828",
-        surface="#3C3836",
-        border="#504945",
-        text="#EBDBB2",
-    ),
-    "tokyo-night": Theme(
-        heading="#BB9AF7",
-        accent="#7DCFFF",
-        muted="#565F89",
-        good="#9ECE6A",
-        warning="#E0AF68",
-        danger="#F7768E",
-        empty="#3B4261",
-        background="#1A1B26",
-        surface="#24283B",
-        border="#3B4261",
-        text="#C0CAF5",
-    ),
-    "solarized-dark": Theme(
-        heading="#6C71C4",
-        accent="#2AA198",
-        muted="#586E75",
-        good="#859900",
-        warning="#B58900",
-        danger="#DC322F",
-        empty="#073642",
-        background="#002B36",
-        surface="#073642",
-        border="#0F4653",
-        text="#EEE8D5",
-    ),
-    "monochrome": Theme(
-        heading="#FFFFFF",
-        accent="#D0D0D0",
-        muted="#777777",
-        good="#E8E8E8",
-        warning="#B8B8B8",
-        danger="#FFFFFF",
-        empty="#555555",
-        background="#101010",
-        surface="#1C1C1C",
-        border="#333333",
-        text="#F0F0F0",
-    ),
-}
+THEME_FIELDS = (
+    "heading",
+    "accent",
+    "muted",
+    "good",
+    "warning",
+    "danger",
+    "empty",
+    "background",
+    "surface",
+    "border",
+    "text",
+)
+
+
+def default_themes_path() -> Path:
+    override = os.environ.get("USAGE_DASHBOARD_THEMES")
+    if override:
+        return Path(override).expanduser()
+    return Path(__file__).resolve().parent / "themes" / "themes.ini"
+
+
+def load_themes(path: Optional[Path] = None) -> Dict[str, Theme]:
+    """Read every palette through the one entry point that lists them.
+
+    themes.ini names the files rather than holding the colours, so a palette is
+    added by dropping a file beside it and listing it -- no editing of a theme
+    someone else wrote, and no merge conflict in a file everyone touches. A
+    later entry redefining an earlier name wins, which is how a shipped theme
+    gets overridden without being edited.
+    """
+
+    index = path or default_themes_path()
+    parser = configparser.ConfigParser()
+    try:
+        if not parser.read(index, encoding="utf-8"):
+            raise MonitorError(f"no theme index at {index}")
+    except configparser.Error as exc:
+        raise MonitorError(f"cannot read {index}: {exc}") from exc
+
+    raw = parser.get("themes", "include", fallback="") if parser.has_section("themes") else ""
+    names = [entry.strip() for line in raw.splitlines() for entry in line.split(",")]
+    themes: Dict[str, Theme] = {}
+    for entry in names:
+        if not entry:
+            continue
+        theme_path = (index.parent / entry).resolve()
+        loaded = _read_theme(theme_path)
+        if loaded is not None:
+            themes[loaded[0]] = loaded[1]
+    if not themes:
+        raise MonitorError(f"{index} lists no usable theme")
+    return themes
+
+
+def _read_theme(path: Path) -> Optional[tuple[str, Theme]]:
+    parser = configparser.ConfigParser()
+    try:
+        if not parser.read(path, encoding="utf-8"):
+            raise MonitorError(f"theme file not found: {path}")
+    except configparser.Error as exc:
+        raise MonitorError(f"cannot read {path}: {exc}") from exc
+    if not parser.has_section("theme"):
+        raise MonitorError(f"{path} has no [theme] section")
+
+    values = {key: parser.get("theme", key, fallback="").strip() for key in THEME_FIELDS}
+    missing = [key for key, value in values.items() if not value]
+    if len(missing) == len(THEME_FIELDS):
+        # custom.ini ships with every key present and empty, so an untouched
+        # one is a template rather than a mistake. Skipping it quietly is what
+        # lets it stay listed in themes.ini until someone fills it in.
+        return None
+    if missing:
+        raise MonitorError(
+            f"{path} is missing a colour for: {', '.join(sorted(missing))}"
+        )
+    bad = [f"{key}={value}" for key, value in values.items() if not _is_hex_colour(value)]
+    if bad:
+        raise MonitorError(f"{path} has values that are not #rrggbb: {', '.join(bad)}")
+
+    name = parser.get("theme", "name", fallback="").strip() or path.stem
+    return name, Theme(**values)
+
+
+def _is_hex_colour(value: str) -> bool:
+    if len(value) != 7 or not value.startswith("#"):
+        return False
+    return all(character in "0123456789abcdefABCDEF" for character in value[1:])
 
 LANGUAGES = ("zh-TW", "en")
 STRINGS: Dict[str, Dict[str, str]] = {
@@ -264,6 +272,7 @@ class Settings:
     clear: bool = True
     timeout: float = 8.0
     cache_file: Optional[Path] = None
+    themes_file: Optional[Path] = None
 
 
 def default_config_path() -> Path:
@@ -292,6 +301,7 @@ def load_settings(path: Path) -> Settings:
 
     monitor = parser["monitor"] if parser.has_section("monitor") else {}
     cache = monitor.get("cache_file", "").strip() if monitor else ""
+    themes = monitor.get("themes", "").strip() if monitor else ""
     return Settings(
         endpoint=monitor.get("endpoint", DEFAULT_ENDPOINT) if monitor else DEFAULT_ENDPOINT,
         providers=_enabled_providers(parser),
@@ -302,6 +312,7 @@ def load_settings(path: Path) -> Settings:
         clear=parser.getboolean("monitor", "clear", fallback=True),
         timeout=parser.getfloat("monitor", "timeout", fallback=8.0),
         cache_file=Path(cache).expanduser() if cache else None,
+        themes_file=Path(themes).expanduser() if themes else None,
     )
 
 
@@ -523,15 +534,22 @@ class TerminalRenderer:
         clear: bool,
         theme: str = "dracula",
         language: str = "zh-TW",
+        themes: Optional[Dict[str, Theme]] = None,
     ):
-        if theme not in THEMES:
-            raise ValueError(f"unknown theme: {theme}")
+        # Palettes come from themes.ini rather than from this module, so the
+        # caller can hand in an already-loaded set instead of re-reading the
+        # files on every construction.
+        available = themes if themes is not None else load_themes()
+        if theme not in available:
+            raise ValueError(
+                f"unknown theme: {theme} (available: {', '.join(sorted(available))})"
+            )
         if language not in LANGUAGES:
             raise ValueError(f"unknown language: {language}")
         self.color = color
         self.clear = clear
         self.theme_name = theme
-        self.theme = THEMES[theme]
+        self.theme = available[theme]
         self.language = language
         self.text = STRINGS[language]
 
@@ -706,7 +724,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="comma separated subset to show, e.g. codex,claude",
     )
-    parser.add_argument("--theme", choices=sorted(THEMES), default=None)
+    # No static choices: the palettes live in themes.ini and a user can add one
+    # without this file knowing about it, so the name is checked after loading.
+    parser.add_argument("--theme", default=None)
+    parser.add_argument("--themes", type=Path, default=None, help="themes.ini to read")
+    parser.add_argument(
+        "--list-themes", action="store_true", help="print the available themes and exit"
+    )
     parser.add_argument("--language", choices=LANGUAGES, default=None)
     parser.add_argument("--interval", type=int, default=None)
     parser.add_argument("--timeout", type=float, default=None)
@@ -736,6 +760,7 @@ def resolve_settings(args: argparse.Namespace) -> Settings:
         clear=configured.clear if args.clear is None else args.clear,
         timeout=args.timeout if args.timeout is not None else configured.timeout,
         cache_file=configured.cache_file,
+        themes_file=args.themes or configured.themes_file,
     )
 
 
@@ -750,6 +775,18 @@ def run(argv: Optional[Sequence[str]] = None) -> int:
         print("error: --interval must be at least 1 second", file=sys.stderr)
         return 2
 
+    try:
+        themes = load_themes(settings.themes_file)
+    except MonitorError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    if args.list_themes:
+        for name in sorted(themes):
+            marker = "*" if name == settings.theme else " "
+            print(f"{marker} {name}")
+        return 0
+
     client = SnapshotClient(
         settings.endpoint, timeout=settings.timeout, cache_path=settings.cache_file
     )
@@ -759,6 +796,7 @@ def run(argv: Optional[Sequence[str]] = None) -> int:
             clear=settings.clear,
             theme=settings.theme,
             language=settings.language,
+            themes=themes,
         )
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)

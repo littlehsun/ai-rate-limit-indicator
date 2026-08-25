@@ -5,7 +5,8 @@ from pathlib import Path
 
 from usage_monitor import (
     DANGER_PERCENT,
-    THEMES,
+    THEME_FIELDS,
+    load_themes,
     WARNING_PERCENT,
     MonitorError,
     Settings,
@@ -197,6 +198,114 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings, Settings())
 
 
+class ThemeLoadingTests(unittest.TestCase):
+    """themes.ini is the only entry point, so everything comes through it."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+
+    def _theme(self, name, **overrides):
+        values = {key: "#101010" for key in THEME_FIELDS}
+        values.update(overrides)
+        body = "[theme]\n" + "\n".join(f"{k} = {v}" for k, v in values.items())
+        (self.root / f"{name}.ini").write_text(body + "\n", encoding="utf-8")
+
+    def _index(self, *entries):
+        path = self.root / "themes.ini"
+        path.write_text(
+            "[themes]\ninclude =\n" + "".join(f"    {e}\n" for e in entries),
+            encoding="utf-8",
+        )
+        return path
+
+    def test_the_shipped_index_loads_ten_themes(self):
+        themes = load_themes()
+
+        self.assertEqual(len(themes), 10)
+        self.assertIn("dracula", themes)
+        # Light palettes are in the set too; the web view takes its background
+        # from the theme, so a light theme means a light page.
+        self.assertIn("solarized-light", themes)
+        for name, theme in themes.items():
+            for field in THEME_FIELDS:
+                self.assertRegex(getattr(theme, field), r"^#[0-9A-Fa-f]{6}$", f"{name}.{field}")
+
+    def test_a_theme_is_named_by_its_file(self):
+        self._theme("seafoam")
+
+        self.assertEqual(list(load_themes(self._index("seafoam.ini"))), ["seafoam"])
+
+    def test_a_later_entry_overrides_an_earlier_name(self):
+        self._theme("base", good="#111111")
+        (self.root / "mine.ini").write_text(
+            "[theme]\nname = base\n"
+            + "\n".join(f"{k} = #222222" for k in THEME_FIELDS)
+            + "\n",
+            encoding="utf-8",
+        )
+
+        themes = load_themes(self._index("base.ini", "mine.ini"))
+
+        # Overriding a shipped theme must not require editing it.
+        self.assertEqual(list(themes), ["base"])
+        self.assertEqual(themes["base"].good, "#222222")
+
+    def test_an_untouched_template_is_skipped_rather_than_refused(self):
+        self._theme("real")
+        blank = "[theme]\n" + "\n".join(f"{k} =" for k in THEME_FIELDS)
+        (self.root / "custom.ini").write_text(blank + "\n", encoding="utf-8")
+
+        # custom.ini ships listed and empty; that is a template, not an error.
+        self.assertEqual(list(load_themes(self._index("real.ini", "custom.ini"))), ["real"])
+
+    def test_a_half_filled_theme_names_what_is_missing(self):
+        self._theme("partial")
+        path = self.root / "partial.ini"
+        path.write_text(
+            path.read_text(encoding="utf-8")
+            .replace("warning = #101010", "warning =")
+            .replace("border = #101010", "border ="),
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(MonitorError) as caught:
+            load_themes(self._index("partial.ini"))
+
+        self.assertIn("warning", str(caught.exception))
+        self.assertIn("border", str(caught.exception))
+
+    def test_a_value_that_is_not_a_colour_is_refused(self):
+        self._theme("wrong", good="green")
+
+        with self.assertRaises(MonitorError) as caught:
+            load_themes(self._index("wrong.ini"))
+
+        self.assertIn("good=green", str(caught.exception))
+
+    def test_a_missing_theme_file_is_reported_by_name(self):
+        with self.assertRaises(MonitorError) as caught:
+            load_themes(self._index("absent.ini"))
+
+        self.assertIn("absent.ini", str(caught.exception))
+
+    def test_an_index_with_nothing_usable_is_an_error(self):
+        with self.assertRaises(MonitorError):
+            load_themes(self._index())
+
+    def test_an_unknown_theme_name_lists_what_is_available(self):
+        self._theme("only")
+
+        with self.assertRaises(ValueError) as caught:
+            TerminalRenderer(
+                color=False, clear=False, theme="nope",
+                themes=load_themes(self._index("only.ini")),
+            )
+
+        self.assertIn("only", str(caught.exception))
+
+
 class SnapshotClientTests(unittest.TestCase):
     """Losing the publisher must not blank the screen."""
 
@@ -338,7 +447,7 @@ class RendererTests(unittest.TestCase):
         self.assertIn("No provider is enabled", rendered)
 
     def test_the_colour_thresholds_match_the_widget(self):
-        theme = THEMES["dracula"]
+        theme = load_themes()["dracula"]
 
         self.assertEqual(TerminalRenderer.theme_color(WARNING_PERCENT - 1, theme), theme.good)
         self.assertEqual(TerminalRenderer.theme_color(WARNING_PERCENT, theme), theme.warning)
