@@ -80,10 +80,14 @@ const PREVIEW_FAMILY = "large";
 // running out. Set this to "codex", "claude", "grok" or "gemini" to pin it.
 const CIRCULAR_PROVIDER = "worst";
 
-// Matches UsageColor in the macOS app so both surfaces agree on "bad".
-const RED = new Color("#FF5454");
-const AMBER = new Color("#FFB82E");
-const GREEN = new Color("#00B04F");
+// Dracula, the same palette the terminal monitor and the web dashboard draw
+// with, so the three screens read as one program. The hues differ from
+// UsageColor in the macOS app; what still agrees is where the lines fall —
+// amber at 70, red at 90 — which is the part a number's colour has to mean the
+// same thing in every surface.
+const RED = new Color("#FF5555");
+const AMBER = new Color("#FFB86C");
+const GREEN = new Color("#50FA7B");
 
 // How soon to ask iOS to run this again. See the note at refreshAfterDate:
 // iOS decides the real cadence, so treat this as the floor, not the interval.
@@ -107,10 +111,15 @@ function colorFor(percent) {
   return GREEN;
 }
 
-const INK = Color.dynamic(new Color("#1C1C1E"), new Color("#F2F2F7"));
-const INK_2 = Color.dynamic(new Color("#6C6C70"), new Color("#9A9AA0"));
-const INK_3 = Color.dynamic(new Color("#A0A0A6"), new Color("#6E6E76"));
-const TRACK = Color.dynamic(new Color("#00000018"), new Color("#FFFFFF20"));
+// Fixed rather than Color.dynamic: dracula is a dark palette, and a themed
+// tile that turns white beside the others on a light home screen is no longer
+// the theme. INK_2 is dracula's cyan because that is what labels a window in
+// the terminal and the web view too.
+const BACKDROP = new Color("#282A36");
+const INK = new Color("#F8F8F2");
+const INK_2 = new Color("#8BE9FD");
+const INK_3 = new Color("#6272A4");
+const TRACK = new Color("#44475A");
 
 const cachePath = () => {
   const fm = FileManager.local();
@@ -249,6 +258,11 @@ function addWindowRow(container, provider, window, options) {
   value.font = Font.boldSystemFont(12);
   value.textColor = options.dim ? INK_3 : INK;
 
+  // The bar belongs to the number above it, so it needs to sit closer to that
+  // row than the next provider does -- without this the label, its bar and the
+  // next label are evenly spaced and the grouping reads wrong. addBlock spends
+  // 5 here; 3 is what the small tile can afford.
+  container.addSpacer(3);
   const barRow = container.addStack();
   barRow.layoutHorizontally();
   addBar(barRow, window.used_percent, options.barWidth);
@@ -534,7 +548,7 @@ function addOfflineMark(container) {
 function buildWidget(state, family) {
   const widget = new ListWidget();
   widget.setPadding(12, 13, 12, 13);
-  widget.backgroundColor = Color.dynamic(new Color("#FFFFFF"), new Color("#1C1C1E"));
+  widget.backgroundColor = BACKDROP;
   // iOS treats this as a hint, not a schedule: widgets share a daily refresh
   // budget, and asking every 5 minutes is far more than it will grant. Asking
   // anyway means it refreshes as soon as the budget allows instead of waiting
@@ -607,7 +621,11 @@ function buildWidget(state, family) {
     if (large) widget.addSpacer();
   } else {
     const rows = smallRows(state.payload);
-    const gap = rows.length > 3 ? 4 : 6;
+    // Four rows leave about 25pt of the tile unused at gap 4, so the rows were
+    // squeezed together above empty space rather than because they had to be.
+    // These spend most of it and keep a margin, since SF Pro's line height is
+    // not the one this was measured with.
+    const gap = rows.length > 3 ? 5 : 9;
     for (const row of rows) {
       addWindowRow(widget, row.provider, row.window, {
         label: row.label,
