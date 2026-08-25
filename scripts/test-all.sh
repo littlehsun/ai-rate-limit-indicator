@@ -53,6 +53,14 @@ echo "=== Unified indicator ==="
 )
 
 echo
+echo "=== Dashboard ==="
+(
+    cd "$ROOT_DIR/dashboard"
+    PYTHONPATH="$PWD" python3 -m unittest discover -s tests -v
+    python3 -m py_compile usage_monitor.py usage_web.py
+)
+
+echo
 echo "=== Unified macOS UI ==="
 bash -n "$ROOT_DIR/macos/install.sh"
 bash -n "$ROOT_DIR/macos/poll-provider.sh"
