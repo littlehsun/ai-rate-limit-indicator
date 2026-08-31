@@ -6,6 +6,7 @@ import html
 import os
 import signal
 import sys
+import time
 import traceback
 from contextlib import suppress
 from pathlib import Path
@@ -37,7 +38,12 @@ from models import (  # noqa: E402
 
 
 POLL_INTERVAL_SECONDS = 60
-ICON_NAMES = ["rate-limit-unified-0", "rate-limit-unified-1"]
+ICON_NAME_PREFIX = "rate-limit-unified"
+# Every render gets a filename nothing has used before. The panel hands a wide
+# icon to the shell's global texture cache, which is keyed on the file's URI and
+# has no idea we rewrote the file underneath it, so any name we reuse can be
+# served from a stale entry forever. Alternating two names only postponed that.
+ICON_GENERATIONS_KEPT = 3
 FALLBACK_ICON_NAME = "view-refresh-symbolic"
 NEUTRAL_TEXT_COLOR = "#FFFFFF"
 METRIC_SEPARATOR_COLOR = "#808080"
@@ -312,13 +318,13 @@ def _icon_dir() -> Optional[Path]:
 
 class UnifiedRateIndicator:
     def __init__(self) -> None:
-        self._icon_idx = 0
+        self._icon_generation = int(time.time())
         self.icon_dir = _icon_dir()
         self.snapshots: tuple[ProviderSnapshot, ...] = ()
         self.auto_selector = AutoDisplaySelector()
         self.settings_window = None
         initial = (
-            self._write_icon(ICON_NAMES[0], (("codex", "--", "green"),))
+            self._write_icon(self._next_icon_name(), (("codex", "--", "green"),))
             or FALLBACK_ICON_NAME
         )
         if self.icon_dir:
@@ -691,12 +697,30 @@ class UnifiedRateIndicator:
         entries: Sequence[IconEntry],
         description: str,
     ) -> None:
-        self._icon_idx ^= 1
-        icon_name = self._write_icon(ICON_NAMES[self._icon_idx], entries)
+        icon_name = self._write_icon(self._next_icon_name(), entries)
         try:
             self.indicator.set_icon_full(icon_name or FALLBACK_ICON_NAME, description)
         except Exception:
             traceback.print_exc()
+        if icon_name:
+            self._prune_icons(icon_name)
+
+    def _next_icon_name(self) -> str:
+        self._icon_generation += 1
+        return f"{ICON_NAME_PREFIX}-{self._icon_generation}"
+
+    def _prune_icons(self, keep: str) -> None:
+        """Drop older generations, keeping a few so a slow load still finds its file."""
+        if self.icon_dir is None:
+            return
+        try:
+            written = sorted(self.icon_dir.glob(f"{ICON_NAME_PREFIX}-*.svg"))
+        except OSError:
+            return
+        for path in written[:-ICON_GENERATIONS_KEPT]:
+            if path.stem != keep:
+                with suppress(OSError):
+                    path.unlink()
 
     def _write_icon(
         self,
