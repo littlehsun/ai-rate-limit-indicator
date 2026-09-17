@@ -20,8 +20,11 @@ from __future__ import annotations
 
 import argparse
 import configparser
+import errno
 import json
 import os
+import signal
+import subprocess
 import sys
 import threading
 import time
@@ -33,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from usage_monitor import (  # noqa: E402
     DANGER_PERCENT,
+    DEFAULT_ENDPOINT,
     LANGUAGES,
     STALE_AFTER_SECONDS,
     STRINGS,
@@ -66,6 +70,9 @@ MIN_WIDTH = 220
 BASE_FONT_PX = 12
 
 AUTOSTART_FILENAME = "rate-limit-float.desktop"
+# The program name a GNOME dock matches its .desktop entry against, which is
+# what lets a minimised widget be clicked back out of the dock.
+PROGRAM_NAME = "rate-limit-float"
 
 # How often the countdowns are redrawn between polls. A reset time that still
 # says "3 hours from now" an hour later is wrong, and redrawing four rows is
@@ -85,6 +92,7 @@ FLOAT_STRINGS: Dict[str, Dict[str, str]] = {
         "theme": "主題",
         "language": "語言",
         "autostart": "登入時自動啟動",
+        "minimize": "縮到 dock",
         "quit": "結束",
         "taken_at": "快照 {time}",
         "never": "尚無快照",
@@ -102,6 +110,7 @@ FLOAT_STRINGS: Dict[str, Dict[str, str]] = {
         "theme": "Theme",
         "language": "Language",
         "autostart": "Start at login",
+        "minimize": "Minimise to the dock",
         "quit": "Quit",
         "taken_at": "Snapshot {time}",
         "never": "No snapshot yet",
@@ -165,6 +174,172 @@ def load_float_settings(path: Optional[Path] = None) -> FloatSettings:
         )
     except ValueError as exc:
         raise MonitorError(f"cannot read [float] in {config_path}: {exc}") from exc
+
+
+def default_snapshot_path() -> Path:
+    """The file the unified indicator writes on every refresh."""
+
+    override = os.environ.get("USAGE_FLOAT_SNAPSHOT")
+    if override:
+        return Path(override).expanduser()
+    base = os.environ.get("XDG_CACHE_HOME")
+    cache_home = Path(base) if base else Path.home() / ".cache"
+    return cache_home / "rate-limit-indicator" / "snapshots.json"
+
+
+def resolve_source(
+    endpoint: str,
+    *,
+    explicit: bool = False,
+    snapshot_path: Optional[Path] = None,
+) -> str:
+    """Where this widget reads its numbers from.
+
+    The widget ships with the indicator and runs on the same desktop, so by
+    default it reads the snapshot the indicator just wrote rather than asking
+    the publisher to hand back what is already on this disk. The publisher
+    exists for the phone: a machine reading its own snapshot over its own
+    loopback needs a service running to tell it what it already knows.
+
+    An endpoint given on the command line, or one pointed somewhere other than
+    the default, is a deliberate choice and wins -- that is how a widget on a
+    second machine reads the first one's publisher over the tailnet.
+    """
+
+    if explicit or endpoint != DEFAULT_ENDPOINT:
+        return endpoint
+    path = snapshot_path or default_snapshot_path()
+    return path.as_uri() if path.is_file() else endpoint
+
+
+def float_pid_path() -> Path:
+    """The running widget's pidfile.
+
+    The tray indicator opens and closes the widget through this, so it is a
+    contract between two programs rather than a private detail. It lives in
+    the runtime directory, which the session clears on logout -- a pid left
+    behind by a crash is meaningless after a reboot anyway.
+    """
+
+    override = os.environ.get("USAGE_FLOAT_PIDFILE")
+    if override:
+        return Path(override).expanduser()
+    base = os.environ.get("XDG_RUNTIME_DIR")
+    if base:
+        return Path(base) / "rate-limit-indicator" / "float.pid"
+    cache = os.environ.get("XDG_CACHE_HOME")
+    cache_home = Path(cache) if cache else Path.home() / ".cache"
+    return cache_home / "rate-limit-indicator" / "float.pid"
+
+
+def running_pid(path: Optional[Path] = None) -> Optional[int]:
+    """The live widget's pid, or None when nothing is running.
+
+    A pidfile is a claim, not a fact: the process behind it can be gone, and
+    after a reboot its number can belong to something else entirely. So the
+    number is only returned once a signal-free kill has confirmed it is
+    ours to signal.
+    """
+
+    pid_path = path or float_pid_path()
+    try:
+        pid = int(pid_path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+    if pid <= 0:
+        return None
+    try:
+        os.kill(pid, 0)
+    except OSError as exc:
+        if exc.errno == errno.ESRCH:
+            return None
+        if exc.errno != errno.EPERM:
+            return None
+        # EPERM means it exists but belongs to somebody else, which means the
+        # number was recycled and this pidfile is stale.
+        return None
+    return pid
+
+
+def write_pid(path: Optional[Path] = None, pid: Optional[int] = None) -> Path:
+    pid_path = path or float_pid_path()
+    pid_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    pid_path.write_text(f"{pid or os.getpid()}\n", encoding="utf-8")
+    return pid_path
+
+
+def clear_pid(path: Optional[Path] = None, pid: Optional[int] = None) -> None:
+    """Remove our own pidfile, and only ours.
+
+    A widget that is quitting must not delete the pidfile of the widget that
+    replaced it, which is what a blind unlink does when the two overlap.
+    """
+
+    pid_path = path or float_pid_path()
+    try:
+        stored = int(pid_path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return
+    if stored != (pid or os.getpid()):
+        return
+    try:
+        pid_path.unlink()
+    except OSError:
+        pass
+
+
+def float_script() -> Path:
+    return Path(__file__).resolve()
+
+
+def start_float(extra: Sequence[str] = (), path: Optional[Path] = None) -> int:
+    """Start the widget, or bring the running one back into view.
+
+    Returns its pid. Starting it twice is what the dock does every time its
+    icon is clicked, so the second start has to mean "show me the first one"
+    rather than "put another widget on the desktop".
+    """
+
+    pid = running_pid(path)
+    if pid is not None:
+        present_float(path)
+        return pid
+    process = subprocess.Popen(
+        [sys.executable, str(float_script()), *extra],
+        start_new_session=True,
+        stdin=subprocess.DEVNULL,
+    )
+    return process.pid
+
+
+def present_float(path: Optional[Path] = None) -> bool:
+    """Ask the running widget to show itself. False when none is running."""
+
+    pid = running_pid(path)
+    if pid is None:
+        return False
+    try:
+        os.kill(pid, signal.SIGUSR1)
+    except OSError:
+        return False
+    return True
+
+
+def stop_float(path: Optional[Path] = None) -> bool:
+    """Ask the running widget to quit. False when none is running."""
+
+    pid = running_pid(path)
+    if pid is None:
+        return False
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        return False
+    return True
+
+
+def float_is_running(path: Optional[Path] = None) -> bool:
+    return running_pid(path) is not None
 
 
 def default_state_path() -> Path:
@@ -248,11 +423,18 @@ class WindowRow:
     reset_text: str
 
 
+# What a provider that is not reporting cleanly gets instead of a word. The
+# healthy case earns no mark at all: four rows each saying "fresh" is four
+# rows of noise, and the eye stops reading a label that never changes.
+STATUS_BADGE = "⚠"
+
+
 @dataclass(frozen=True)
 class ProviderRow:
     provider: str
     label: str
     status: str
+    badge: str
     fresh: bool
     windows: Tuple[WindowRow, ...]
     extras: Tuple[str, ...]
@@ -311,7 +493,8 @@ def build_provider_row(
         return ProviderRow(
             provider=name,
             label=name.title(),
-            status="",
+            status=text["missing"],
+            badge=STATUS_BADGE,
             fresh=False,
             windows=(),
             extras=(text["missing"],),
@@ -327,6 +510,7 @@ def build_provider_row(
         provider=provider.provider,
         label=provider.label,
         status=provider.status,
+        badge="" if provider.status == "fresh" else STATUS_BADGE,
         fresh=provider.status == "fresh",
         windows=tuple(
             build_window_row(window, now=now, text=text) for window in windows
@@ -433,6 +617,18 @@ def build_css(theme: Theme, *, scale: float = DEFAULT_SCALE) -> str:
     color: {theme.text};
     font-family: monospace;
 }}
+button.float-minimize {{
+    color: {theme.muted};
+    background: none;
+    border: none;
+    box-shadow: none;
+    padding: 0 6px;
+    min-height: 0;
+    min-width: 0;
+}}
+button.float-minimize:hover {{
+    color: {theme.text};
+}}
 .float-card {{
     background-color: {theme.surface};
     border-radius: 8px;
@@ -524,6 +720,7 @@ class FloatingWidget:
         themes: Mapping[str, Theme],
         *,
         state_path: Optional[Path] = None,
+        pid_path: Optional[Path] = None,
     ):
         import gi
 
@@ -539,11 +736,17 @@ class FloatingWidget:
         self._gtk = Gtk
         self._pango = Pango
 
+        # A dock matches a window to its .desktop entry by program name, and a
+        # window it cannot match is one it cannot bring back. This has to be
+        # set before the first window exists to reach the windows themselves.
+        GLib.set_prgname(PROGRAM_NAME)
+
         self.settings = settings
         self.float = float_settings
         self.themes = dict(themes)
         self.text = strings_for(settings.language)
         self.state_path = state_path
+        self.pid_path = pid_path
         self.snapshot: Optional[Snapshot] = None
         self.message: Optional[str] = None
 
@@ -591,6 +794,13 @@ class FloatingWidget:
         self.window.add_events(
             Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.SCROLL_MASK
         )
+        # A second launch -- from the dock, the launcher, or the tray menu --
+        # signals this process instead of putting a second widget on the
+        # desktop, and the tray's "off" switch is the same handshake.
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, self._on_present_signal)
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, self._on_quit_signal)
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGINT, self._on_quit_signal)
+
         self.window.connect("button-press-event", self._on_button_press)
         self.window.connect("scroll-event", self._on_scroll)
         self.window.connect("configure-event", self._on_configure)
@@ -639,6 +849,7 @@ class FloatingWidget:
                 False,
                 0,
             )
+        header.pack_end(self._minimize_button(), False, False, 0)
         self.root.pack_start(header, False, False, 0)
 
         if self.snapshot is None:
@@ -676,6 +887,22 @@ class FloatingWidget:
 
         self.root.show_all()
 
+    def _minimize_button(self):
+        """One click to get the widget out of the way.
+
+        It is a button rather than a gesture on the window because the window
+        itself is a drag handle: anything that starts with a press and ends
+        with a release somewhere else is already a move.
+        """
+
+        Gtk = self._gtk
+        button = Gtk.Button(label="—")
+        button.set_relief(Gtk.ReliefStyle.NONE)
+        button.set_tooltip_text(self.text["minimize"])
+        button.get_style_context().add_class("float-minimize")
+        button.connect("clicked", lambda _button: self.minimize())
+        return button
+
     def _provider_box(self, row: ProviderRow):
         Gtk = self._gtk
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
@@ -688,17 +915,12 @@ class FloatingWidget:
         name = self._label(row.label, "float-provider")
         name.set_hexpand(True)
         heading.pack_start(name, True, True, 0)
-        if row.status:
-            heading.pack_end(
-                self._label(
-                    row.status,
-                    "float-muted" if row.fresh else "float-warning",
-                    align=1.0,
-                ),
-                False,
-                False,
-                0,
-            )
+        if row.badge:
+            # The word itself moves to the tooltip: "stale" is the sort of
+            # detail you want when you go looking, not on screen four times.
+            mark = self._label(row.badge, "float-warning", align=1.0)
+            mark.set_tooltip_text(row.status)
+            heading.pack_end(mark, False, False, 0)
         box.pack_start(heading, False, False, 0)
 
         # Antigravity names a window "Claude/GPT 7D" and Codex names one "7D".
@@ -835,6 +1057,33 @@ class FloatingWidget:
     def _shrink_to_fit(self) -> None:
         self.window.resize(self.float.width, 1)
 
+    def minimize(self) -> None:
+        """Put the widget in the dock rather than on the desktop.
+
+        Two things have to be given up for the duration. Mutter will not
+        minimise a utility window at all -- it offers no minimise action for
+        one -- so the window says it is an ordinary one first. And a minimised
+        window that is still hidden from the taskbar has nowhere left to be
+        clicked back from, which is a widget you need a terminal to recover.
+
+        Both are taken back in present(): a desk widget that sits in the
+        window switcher and the taskbar has stopped being furniture.
+        """
+
+        self.window.set_type_hint(self._gdk.WindowTypeHint.NORMAL)
+        self.window.set_skip_taskbar_hint(False)
+        self.window.iconify()
+
+    def present(self) -> None:
+        self.window.deiconify()
+        self.window.set_skip_taskbar_hint(True)
+        self.window.set_type_hint(self._gdk.WindowTypeHint.UTILITY)
+        self.window.present()
+        if self.float.on_top:
+            # present() can drop the window below the one that asked for it,
+            # and a widget that says it is always on top has to be.
+            self.window.set_keep_above(True)
+
     def _toggle_on_top(self) -> None:
         self.float = replace(self.float, on_top=not self.float.on_top)
         self.window.set_keep_above(self.float.on_top)
@@ -869,7 +1118,10 @@ class FloatingWidget:
         menu.append(
             self._submenu(
                 self.text["scale"],
-                [(f"{round(value * 100)}%", value) for value in (0.8, 1.0, 1.25, 1.5)],
+                [
+                    (f"{round(value * 100)}%", value)
+                    for value in (0.8, 1.0, 1.3, 1.5, 2.0)
+                ],
                 self.float.scale,
                 self._set_scale,
             )
@@ -897,6 +1149,10 @@ class FloatingWidget:
         menu.append(autostart)
 
         menu.append(Gtk.SeparatorMenuItem())
+        minimize = Gtk.MenuItem(label=self.text["minimize"])
+        minimize.connect("activate", lambda _item: self.minimize())
+        menu.append(minimize)
+
         quit_item = Gtk.MenuItem(label=self.text["quit"])
         quit_item.connect("activate", lambda _item: self.window.destroy())
         menu.append(quit_item)
@@ -964,17 +1220,27 @@ class FloatingWidget:
         self.render()
         return False
 
+    def _on_present_signal(self) -> bool:
+        self.present()
+        return True
+
+    def _on_quit_signal(self) -> bool:
+        self.window.destroy()
+        return False
+
     def _on_destroy(self, _widget) -> None:
         self._stop.set()
         self._wake.set()
         if self._save_pending:
             self._glib.source_remove(self._save_pending)
         write_state(state_from(self.float), self.state_path)
+        clear_pid(self.pid_path)
         self._gtk.main_quit()
 
     # -- lifecycle -----------------------------------------------------
 
     def run(self) -> int:
+        write_pid(self.pid_path)
         self.render()
         # Read the target before mapping the window. Showing it makes the
         # window manager place it and fire configure-event, which would
@@ -1027,6 +1293,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--autostart",
         choices=("install", "remove", "status"),
         help="manage the login autostart entry, then exit",
+    )
+    parser.add_argument(
+        "--status", action="store_true", help="say whether a widget is running, then exit"
+    )
+    parser.add_argument(
+        "--stop", action="store_true", help="close the running widget, then exit"
+    )
+    parser.add_argument(
+        "--toggle",
+        action="store_true",
+        help="close the running widget, or start one when none is running",
     )
     return parser
 
@@ -1083,6 +1360,23 @@ def monitor_namespace(args: argparse.Namespace) -> argparse.Namespace:
 def run(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
 
+    if args.status:
+        pid = running_pid()
+        print(f"running (pid {pid})" if pid else "not running")
+        return 0 if pid else 1
+
+    if args.stop or (args.toggle and float_is_running()):
+        stopped = stop_float()
+        print("closed" if stopped else "no widget running")
+        return 0 if stopped else 1
+
+    if not args.autostart and present_float():
+        # Somebody asked for the widget while one is already running: the
+        # dock icon, the launcher, or a second terminal. They want to see it,
+        # not to own a second copy of it.
+        print("a widget is already running; brought it to the front")
+        return 0
+
     if args.autostart:
         if args.autostart == "install":
             print(f"autostart written to {install_autostart()}")
@@ -1094,6 +1388,10 @@ def run(argv: Optional[Sequence[str]] = None) -> int:
 
     try:
         settings = resolve_monitor_settings(monitor_namespace(args))
+        settings = replace(
+            settings,
+            endpoint=resolve_source(settings.endpoint, explicit=args.endpoint is not None),
+        )
         themes = load_themes(settings.themes_file)
     except MonitorError as exc:
         print(f"error: {exc}", file=sys.stderr)

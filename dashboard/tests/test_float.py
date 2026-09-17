@@ -1,10 +1,13 @@
+import inspect
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 
 from usage_float import (
     DEFAULT_OPACITY,
+    STATUS_BADGE,
     DEFAULT_WIDTH,
     MAX_OPACITY,
     MIN_OPACITY,
@@ -17,22 +20,30 @@ from usage_float import (
     build_parser,
     build_rows,
     build_window_row,
+    clear_pid,
+    float_is_running,
     header_text,
     install_autostart,
     is_current,
     load_float_settings,
+    FloatingWidget,
     monitor_namespace,
     read_state,
     remove_autostart,
     resolve_float_settings,
+    resolve_source,
+    running_pid,
+    stop_float,
     state_from,
     status_text,
     strings_for,
     tone_for,
+    write_pid,
     write_state,
 )
 from usage_monitor import (
     DANGER_PERCENT,
+    DEFAULT_ENDPOINT,
     STALE_AFTER_SECONDS,
     THEME_FIELDS,
     WARNING_PERCENT,
@@ -145,8 +156,9 @@ class RowTests(unittest.TestCase):
         )
         self.assertEqual(rows[0].windows, ())
         self.assertEqual(rows[0].extras, (self.text["missing"],))
+        self.assertEqual(rows[0].badge, STATUS_BADGE)
 
-    def test_a_stale_provider_is_not_marked_fresh(self):
+    def test_a_stale_provider_is_marked_with_a_badge_not_a_word(self):
         rows = build_rows(
             snapshot(provider(status="stale")),
             ("claude",),
@@ -155,6 +167,19 @@ class RowTests(unittest.TestCase):
             compact=False,
         )
         self.assertFalse(rows[0].fresh)
+        self.assertEqual(rows[0].badge, STATUS_BADGE)
+        # The word is kept for the tooltip; it is the screen it stays off.
+        self.assertEqual(rows[0].status, "stale")
+
+    def test_a_fresh_provider_earns_no_mark_at_all(self):
+        rows = build_rows(
+            snapshot(provider(status="fresh")),
+            ("claude",),
+            now=0.0,
+            text=self.text,
+            compact=False,
+        )
+        self.assertEqual(rows[0].badge, "")
 
 
 class StatusTests(unittest.TestCase):
@@ -353,6 +378,123 @@ class AutostartTests(unittest.TestCase):
             self.assertTrue(autostart_installed(path))
             self.assertTrue(remove_autostart(path))
             self.assertFalse(remove_autostart(path))
+
+
+class SourceTests(unittest.TestCase):
+    def test_the_local_snapshot_beats_asking_a_publisher_for_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            snapshot_file = Path(directory) / "snapshots.json"
+            snapshot_file.write_text("{}", encoding="utf-8")
+            self.assertEqual(
+                resolve_source(DEFAULT_ENDPOINT, snapshot_path=snapshot_file),
+                snapshot_file.as_uri(),
+            )
+
+    def test_without_a_local_snapshot_the_publisher_is_still_the_answer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(
+                resolve_source(
+                    DEFAULT_ENDPOINT, snapshot_path=Path(directory) / "absent.json"
+                ),
+                DEFAULT_ENDPOINT,
+            )
+
+    def test_an_endpoint_on_the_command_line_wins(self):
+        with tempfile.TemporaryDirectory() as directory:
+            snapshot_file = Path(directory) / "snapshots.json"
+            snapshot_file.write_text("{}", encoding="utf-8")
+            self.assertEqual(
+                resolve_source(
+                    DEFAULT_ENDPOINT, explicit=True, snapshot_path=snapshot_file
+                ),
+                DEFAULT_ENDPOINT,
+            )
+
+    def test_a_configured_remote_publisher_is_not_second_guessed(self):
+        # A widget on a second machine reads the first one's publisher, and a
+        # stale snapshots.json of its own must not shadow that.
+        with tempfile.TemporaryDirectory() as directory:
+            snapshot_file = Path(directory) / "snapshots.json"
+            snapshot_file.write_text("{}", encoding="utf-8")
+            remote = "http://100.64.0.1:8477/usage.json"
+            self.assertEqual(
+                resolve_source(remote, snapshot_path=snapshot_file), remote
+            )
+
+
+class PidfileTests(unittest.TestCase):
+    def test_our_own_pid_reads_back_as_running(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "float.pid"
+            write_pid(path)
+            self.assertEqual(running_pid(path), os.getpid())
+            self.assertTrue(float_is_running(path))
+
+    def test_no_pidfile_is_not_running(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "float.pid"
+            self.assertIsNone(running_pid(path))
+            self.assertFalse(stop_float(path))
+
+    def test_a_pidfile_left_by_a_dead_process_is_not_running(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "float.pid"
+            # A pid nothing can be running under: the kernel's own ceiling
+            # plus one, so this cannot collide with a live process.
+            path.write_text("4194305\n", encoding="utf-8")
+            self.assertIsNone(running_pid(path))
+
+    def test_a_pidfile_holding_nonsense_is_not_running(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "float.pid"
+            for content in ("", "not a pid", "-1", "0"):
+                path.write_text(content, encoding="utf-8")
+                self.assertIsNone(running_pid(path), content)
+
+    def test_quitting_removes_our_pidfile(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "float.pid"
+            write_pid(path)
+            clear_pid(path)
+            self.assertFalse(path.exists())
+
+    def test_quitting_leaves_a_successor_s_pidfile_alone(self):
+        # Two widgets can overlap for a moment while one is closing. The one
+        # going away must not take the new one's claim with it.
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "float.pid"
+            write_pid(path, pid=os.getpid())
+            clear_pid(path, pid=os.getpid() + 1)
+            self.assertTrue(path.exists())
+
+
+class ControlFlagTests(unittest.TestCase):
+    def test_the_control_flags_parse(self):
+        args = build_parser().parse_args(["--status"])
+        self.assertTrue(args.status)
+        self.assertTrue(build_parser().parse_args(["--stop"]).stop)
+        self.assertTrue(build_parser().parse_args(["--toggle"]).toggle)
+
+    def test_the_scale_menu_offers_the_larger_sizes(self):
+        source = inspect.getsource(FloatingWidget._popup_menu)
+        self.assertIn("(0.8, 1.0, 1.3, 1.5, 2.0)", source)
+
+    def test_minimising_gives_up_the_utility_hint_and_the_taskbar_one(self):
+        # Mutter offers no minimise action for a utility window, so a window
+        # that stays one never goes down; and one that goes down while still
+        # hidden from the taskbar cannot be clicked back up.
+        source = inspect.getsource(FloatingWidget.minimize)
+        self.assertLess(
+            source.index("WindowTypeHint.NORMAL"), source.index("iconify()")
+        )
+        self.assertLess(
+            source.index("set_skip_taskbar_hint(False)"), source.index("iconify()")
+        )
+
+    def test_restoring_takes_both_of_them_back(self):
+        source = inspect.getsource(FloatingWidget.present)
+        self.assertIn("set_skip_taskbar_hint(True)", source)
+        self.assertIn("WindowTypeHint.UTILITY", source)
 
 
 class MenuTests(unittest.TestCase):

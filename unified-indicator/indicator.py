@@ -26,6 +26,12 @@ from adapters import (  # noqa: E402
     read_manager_config,
     write_display_settings,
 )
+from float_widget import (  # noqa: E402
+    float_is_running,
+    float_widget_available,
+    start_float,
+    stop_float,
+)
 from models import (  # noqa: E402
     ProviderSnapshot,
     UsageWindow,
@@ -482,6 +488,11 @@ class UnifiedRateIndicator:
             if index < len(visible_snapshots) - 1:
                 self.menu.append(Gtk.SeparatorMenuItem())
         self.menu.append(Gtk.SeparatorMenuItem())
+        if float_widget_available():
+            float_item = Gtk.CheckMenuItem(label="Desktop widget")
+            float_item.set_active(float_is_running())
+            float_item.connect("toggled", self._toggle_float)
+            self.menu.append(float_item)
         settings_item = Gtk.MenuItem(label="Display settings…")
         settings_item.connect("activate", self._open_settings)
         self.menu.append(settings_item)
@@ -527,6 +538,21 @@ class UnifiedRateIndicator:
             providers.remove(provider)
         write_display_settings("custom", tuple(providers))
         self.update()
+
+    def _toggle_float(self, item) -> None:
+        """Open or close the floating desktop widget.
+
+        The widget is a separate process on purpose: it draws a window on
+        every refresh, and a tray icon that shares its main loop stops
+        updating whenever that window is busy. The pidfile is the whole
+        handshake -- the tray does not supervise it, and a widget started
+        from the dock or at login is the same widget this closes.
+        """
+
+        if item.get_active():
+            start_float()
+        else:
+            stop_float()
 
     def _open_settings(self, _item=None) -> None:
         if self.settings_window is not None:

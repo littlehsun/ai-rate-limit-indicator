@@ -13,6 +13,8 @@ reset 倒數與詳細資訊。兩個平台共用相同 backend 邏輯。
 
 - 一個 GNOME indicator 顯示所有啟用的 provider。
 - 一個使用相同 backend 的原生 macOS menu-bar app。
+- Linux 桌面懸浮視窗，可從 indicator 選單開關，見
+  [dashboard/README.md](dashboard/README.md)。
 - Auto 模式會依最近有變化的 7D 用量自動選擇 provider。
 - Custom 模式可多選 provider，並自訂顯示順序。
 - Indicator 與下拉選單可以分別決定是否顯示。

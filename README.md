@@ -14,6 +14,8 @@ SwiftUI app consume that same backend and display the selected providers, their
 
 - One GNOME panel indicator for all enabled providers.
 - One native macOS menu-bar app using the same normalized backend.
+- A floating desktop widget for Linux, opened and closed from the tray menu.
+  See [dashboard/README.md](dashboard/README.md).
 - Auto mode follows the most recently changed fresh 7D quota.
 - Custom mode supports multiple providers and a configurable display order.
 - Independent controls for panel visibility and dropdown visibility.
