@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import binascii
 import json
 import os
 import sys
@@ -10,7 +11,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
@@ -384,6 +385,39 @@ def _post_json(request: urllib.request.Request, timeout: float) -> dict[str, Any
         return json.loads(response.read().decode("utf-8"))
 
 
+AUTH_CLAIM = "https://api.openai.com/auth"
+
+
+def account_id_from_token(access_token: str) -> Optional[str]:
+    """Read the ChatGPT account id out of the access token's own claims.
+
+    The usage response carries an `account_id` field that is now an empty
+    string, and without an account id the reset-credit endpoint is never
+    called -- which is how the credits kept their count but lost their expiry
+    dates. The token that authorises that call already names the account it
+    belongs to, so nothing new is asked of the user.
+
+    Only the claim is read. Nothing here logs the token, and a token that is
+    not a JWT is simply no account id.
+    """
+
+    parts = access_token.split(".")
+    if len(parts) != 3:
+        return None
+    payload = parts[1]
+    payload += "=" * (-len(payload) % 4)
+    try:
+        claims = json.loads(base64.urlsafe_b64decode(payload))
+    except (ValueError, TypeError, binascii.Error):
+        return None
+    if not isinstance(claims, dict):
+        return None
+    auth = claims.get(AUTH_CLAIM)
+    if not isinstance(auth, dict):
+        return None
+    return _optional_str(auth.get("chatgpt_account_id"))
+
+
 def fetch_wham_snapshot(
     access_token: str,
     usage_url: str = USAGE_URL,
@@ -420,12 +454,17 @@ def fetch_wham_snapshot(
     if snapshot is None:
         raise RuntimeError("wham usage response did not include usable rate limits")
 
-    if snapshot.account_id:
+    account_id = snapshot.account_id or account_id_from_token(access_token)
+    if account_id:
+        if account_id != snapshot.account_id:
+            # Recorded on the snapshot so the cache carries it too: the
+            # staleness check compares the account the credits belong to.
+            snapshot = replace(snapshot, account_id=account_id)
         try:
             credits = _fetch_json(
                 reset_credits_url,
                 access_token=access_token,
-                account_id=snapshot.account_id,
+                account_id=account_id,
                 timeout=timeout,
             )
             snapshot = merge_reset_credits(snapshot, credits)
@@ -455,7 +494,14 @@ def parse_usage_response(payload: Mapping[str, Any], updated_at: Optional[str] =
     if five_hour is None and weekly is None:
         return None
 
-    reset_credits = _parse_reset_credit_payload(rate_limit.get("rate_limit_reset_credits"))
+    # The count used to live inside rate_limit and now arrives beside it. Both
+    # are read, newest first: an account still being served the old shape
+    # should not lose the number while this rolls out.
+    reset_credits = _parse_reset_credit_payload(
+        payload.get("rate_limit_reset_credits")
+        if isinstance(payload.get("rate_limit_reset_credits"), dict)
+        else rate_limit.get("rate_limit_reset_credits")
+    )
     return CodexRateSnapshot(
         updated_at=updated_at or _utc_now(),
         five_hour=five_hour,

@@ -9,6 +9,8 @@ from unittest.mock import patch
 
 from codex_rate import format_indicator_label
 from wham import (
+    account_id_from_token,
+    fetch_wham_snapshot,
     CLIENT_ID,
     TOKEN_ENDPOINT,
     describe_exposed_auth_file,
@@ -702,3 +704,138 @@ def _jwt(**claims: int) -> str:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def jwt_with(claims: dict) -> str:
+    body = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+    return f"header.{body}.signature"
+
+
+class ResetCreditLocationTests(unittest.TestCase):
+    """Where ChatGPT puts the reset credits, which has moved.
+
+    The count used to sit inside `rate_limit` and now arrives beside it. The
+    old place is still read, because an account being served the old shape
+    must not lose the number while the change rolls out.
+    """
+
+    @staticmethod
+    def usage(credits_at_top=None, credits_inside=None):
+        rate_limit = {
+            "primary_window": {
+                "used_percent": 40,
+                "limit_window_seconds": 604800,
+                "reset_at": "2026-07-01T08:00:00Z",
+            },
+            "secondary_window": None,
+        }
+        if credits_inside is not None:
+            rate_limit["rate_limit_reset_credits"] = credits_inside
+        payload = {"account_id": "acct_123", "rate_limit": rate_limit}
+        if credits_at_top is not None:
+            payload["rate_limit_reset_credits"] = credits_at_top
+        return payload
+
+    def test_credits_beside_rate_limit_are_read(self):
+        snapshot = parse_usage_response(
+            self.usage(credits_at_top={"available_count": 2, "applicable_available_count": 2})
+        )
+        self.assertEqual(snapshot.reset_credits_available, 2)
+
+    def test_credits_inside_rate_limit_are_still_read(self):
+        snapshot = parse_usage_response(self.usage(credits_inside={"available_count": 3}))
+        self.assertEqual(snapshot.reset_credits_available, 3)
+
+    def test_the_newer_location_wins_when_both_are_present(self):
+        snapshot = parse_usage_response(
+            self.usage(credits_at_top={"available_count": 2}, credits_inside={"available_count": 9})
+        )
+        self.assertEqual(snapshot.reset_credits_available, 2)
+
+    def test_no_credits_anywhere_is_no_count(self):
+        self.assertIsNone(parse_usage_response(self.usage()).reset_credits_available)
+
+
+class AccountIdFromTokenTests(unittest.TestCase):
+    """The account id the credit endpoint needs.
+
+    The usage response now carries an empty `account_id`, and without one the
+    credit endpoint is never called -- which is how the credits kept their
+    count and lost their expiry dates. The token authorising that call already
+    names its account.
+    """
+
+    def test_the_claim_is_read(self):
+        token = jwt_with({"https://api.openai.com/auth": {"chatgpt_account_id": "acct_from_token"}})
+        self.assertEqual(account_id_from_token(token), "acct_from_token")
+
+    def test_a_token_that_is_not_a_jwt_is_no_account_id(self):
+        self.assertIsNone(account_id_from_token("not-a-jwt"))
+        self.assertIsNone(account_id_from_token("two.parts"))
+
+    def test_a_jwt_without_the_claim_is_no_account_id(self):
+        self.assertIsNone(account_id_from_token(jwt_with({"sub": "x"})))
+        self.assertIsNone(account_id_from_token(jwt_with({"https://api.openai.com/auth": {}})))
+
+    def test_undecodable_claims_are_no_account_id(self):
+        self.assertIsNone(account_id_from_token("header.!!!not-base64!!!.signature"))
+
+    def test_an_empty_account_id_falls_back_to_the_token(self):
+        # This is the live shape: the field is present and empty.
+        usage = {
+            "account_id": "",
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 40,
+                    "limit_window_seconds": 604800,
+                    "reset_at": "2026-07-01T08:00:00Z",
+                },
+                "secondary_window": None,
+            },
+            "rate_limit_reset_credits": {"available_count": 2},
+        }
+        credits = {
+            "available_count": 2,
+            "credits": [
+                {"status": "available", "expires_at": "2026-10-04T05:39:57Z"},
+                {"status": "available", "expires_at": "2026-10-05T04:21:26Z"},
+            ],
+        }
+        token = jwt_with({"https://api.openai.com/auth": {"chatgpt_account_id": "acct_from_token"}})
+        seen = {}
+
+        def fake_fetch(url, access_token, timeout, account_id=None):
+            seen[url] = account_id
+            return credits if "reset-credits" in url else usage
+
+        with patch("wham._fetch_json", side_effect=fake_fetch):
+            snapshot = fetch_wham_snapshot(token)
+
+        self.assertEqual(snapshot.reset_credits_available, 2)
+        self.assertEqual(len(snapshot.reset_credit_expirations), 2)
+        self.assertEqual(snapshot.account_id, "acct_from_token")
+        self.assertEqual(
+            seen["https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"],
+            "acct_from_token",
+        )
+
+    def test_a_usage_account_id_is_not_overridden_by_the_token(self):
+        usage = {
+            "account_id": "acct_from_usage",
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 40,
+                    "limit_window_seconds": 604800,
+                    "reset_at": "2026-07-01T08:00:00Z",
+                },
+                "secondary_window": None,
+            },
+        }
+        token = jwt_with({"https://api.openai.com/auth": {"chatgpt_account_id": "acct_from_token"}})
+
+        def fake_fetch(url, access_token, timeout, account_id=None):
+            return {"credits": []} if "reset-credits" in url else usage
+
+        with patch("wham._fetch_json", side_effect=fake_fetch):
+            snapshot = fetch_wham_snapshot(token)
+        self.assertEqual(snapshot.account_id, "acct_from_usage")
