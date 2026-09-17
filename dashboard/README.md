@@ -106,7 +106,14 @@ python3 usage_float.py --toggle               # one or the other
 | Scroll | opacity, in 5% steps |
 | The `—` button | minimise it into the dock |
 
-Text sizes are 80%, 100%, 130%, 150% and 200%.
+Text sizes are 30%, 50%, 80%, 100%, 130%, 150% and 200%.
+
+A provider's error is shown as its headline only — "AGY quota endpoint is
+unavailable", not the `urlopen`/SSL plumbing after the colon — and every line
+is capped in characters. Ellipsizing alone does not do it: a label that is
+ellipsized still claims it needs its full width, and GTK sizes the window to
+what its labels claim, so one talkative backend used to widen the whole widget.
+The full text is in the line's tooltip.
 
 ### Where the numbers come from
 

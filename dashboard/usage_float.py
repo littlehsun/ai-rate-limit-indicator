@@ -63,7 +63,7 @@ DEFAULT_OPACITY = 0.95
 DEFAULT_SCALE = 1.0
 MIN_OPACITY = 0.30
 MAX_OPACITY = 1.0
-MIN_SCALE = 0.7
+MIN_SCALE = 0.3
 MAX_SCALE = 2.0
 DEFAULT_WIDTH = 320
 MIN_WIDTH = 220
@@ -423,6 +423,19 @@ class WindowRow:
     reset_text: str
 
 
+# How much of a provider's error the widget says out loud. The rest is in the
+# tooltip: a backend can hand back a paragraph of Python traceback, and a
+# window that grows to fit one has stopped being a widget and started being a
+# log viewer sitting on top of the work.
+ERROR_CHARS = 42
+
+# The widest any single line is allowed to ask to be, in characters. GTK sizes
+# a window to what its labels claim they need, and ellipsizing alone does not
+# change that claim -- it only decides what is dropped once the label is
+# already too small.
+LINE_CHARS = 34
+
+
 # What a provider that is not reporting cleanly gets instead of a word. The
 # healthy case earns no mark at all: four rows each saying "fresh" is four
 # rows of noise, and the eye stops reading a label that never changes.
@@ -439,6 +452,29 @@ class ProviderRow:
     windows: Tuple[WindowRow, ...]
     extras: Tuple[str, ...]
     error: Optional[str]
+    error_detail: Optional[str]
+
+
+def short_error(message: Optional[str], limit: int = ERROR_CHARS) -> str:
+    """The headline of a provider error, without its plumbing.
+
+    Backend errors are written for a log: "AGY quota endpoint is unavailable:
+    <urlopen error [SSL: WRONG_VERSION_NUMBER] ...>". The half before the
+    colon is the part that tells you what to do about it; everything after it
+    is for whoever is fixing the adapter, and the tooltip keeps that.
+    """
+
+    if not message:
+        return ""
+    headline = " ".join(message.split())
+    for separator in (": ", " - "):
+        head, found, _ = headline.partition(separator)
+        if found and len(head) >= 8:
+            headline = head
+            break
+    if len(headline) > limit:
+        headline = headline[: limit - 1].rstrip() + "…"
+    return headline
 
 
 def tone_for(used_percent: Optional[int]) -> str:
@@ -499,6 +535,7 @@ def build_provider_row(
             windows=(),
             extras=(text["missing"],),
             error=None,
+            error_detail=None,
         )
     windows = ordered_windows(provider)
     # Compact mode keeps the lead window only. `ordered_windows` already puts
@@ -516,7 +553,8 @@ def build_provider_row(
             build_window_row(window, now=now, text=text) for window in windows
         ),
         extras=() if compact else tuple(provider.extras),
-        error=provider.error,
+        error=short_error(provider.error) or None,
+        error_detail=provider.error,
     )
 
 
@@ -820,9 +858,11 @@ class FloatingWidget:
     def _label(self, content: str, *classes: str, align: float = 0.0):
         label = self._gtk.Label(label=content)
         label.set_xalign(align)
-        # A provider error can be a paragraph. Ellipsizing keeps one bad
-        # message from stretching the widget across the desktop.
+        # Both are needed. Ellipsizing decides what a too-small label drops;
+        # the character cap is what makes it too small in the first place,
+        # instead of the window widening to fit whatever a backend said.
         label.set_ellipsize(self._pango.EllipsizeMode.END)
+        label.set_max_width_chars(LINE_CHARS)
         for name in classes:
             label.get_style_context().add_class(name)
         return label
@@ -933,7 +973,9 @@ class FloatingWidget:
         for extra in row.extras:
             box.pack_start(self._label(extra, "float-muted"), False, False, 0)
         if row.error:
-            box.pack_start(self._label(row.error, "float-danger"), False, False, 0)
+            message = self._label(row.error, "float-danger")
+            message.set_tooltip_text(row.error_detail)
+            box.pack_start(message, False, False, 0)
         return box
 
     def _window_box(self, window: WindowRow, labels=None):
@@ -1120,7 +1162,7 @@ class FloatingWidget:
                 self.text["scale"],
                 [
                     (f"{round(value * 100)}%", value)
-                    for value in (0.8, 1.0, 1.3, 1.5, 2.0)
+                    for value in (0.3, 0.5, 0.8, 1.0, 1.3, 1.5, 2.0)
                 ],
                 self.float.scale,
                 self._set_scale,

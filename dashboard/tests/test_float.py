@@ -7,6 +7,8 @@ from pathlib import Path
 
 from usage_float import (
     DEFAULT_OPACITY,
+    ERROR_CHARS,
+    MIN_SCALE,
     STATUS_BADGE,
     DEFAULT_WIDTH,
     MAX_OPACITY,
@@ -34,6 +36,7 @@ from usage_float import (
     resolve_source,
     running_pid,
     stop_float,
+    short_error,
     state_from,
     status_text,
     strings_for,
@@ -380,6 +383,54 @@ class AutostartTests(unittest.TestCase):
             self.assertFalse(remove_autostart(path))
 
 
+class ErrorTests(unittest.TestCase):
+    def test_a_backend_error_keeps_its_headline_and_drops_its_plumbing(self):
+        self.assertEqual(
+            short_error(
+                "AGY quota endpoint is unavailable: <urlopen error [SSL: "
+                "WRONG_VERSION_NUMBER] wrong version number (_ssl.c:1000)>"
+            ),
+            "AGY quota endpoint is unavailable",
+        )
+
+    def test_an_error_with_no_colon_is_cut_to_length(self):
+        long = "something went wrong " * 10
+        short = short_error(long)
+        self.assertLessEqual(len(short), ERROR_CHARS)
+        self.assertTrue(short.endswith("…"))
+
+    def test_a_short_error_is_left_alone(self):
+        self.assertEqual(short_error("AGY is not running"), "AGY is not running")
+
+    def test_a_colon_too_early_to_be_a_headline_is_not_a_cut(self):
+        # "err: the server refused" would otherwise leave the word "err".
+        self.assertEqual(
+            short_error("err: the server refused"), "err: the server refused"
+        )
+
+    def test_no_error_is_no_line(self):
+        self.assertEqual(short_error(None), "")
+        self.assertEqual(short_error(""), "")
+
+    def test_the_full_text_survives_for_the_tooltip(self):
+        detail = "AGY quota endpoint is unavailable: <urlopen error [SSL]>"
+        rows = build_rows(
+            snapshot(provider(error=detail)),
+            ("claude",),
+            now=0.0,
+            text=strings_for("en"),
+            compact=False,
+        )
+        self.assertEqual(rows[0].error, "AGY quota endpoint is unavailable")
+        self.assertEqual(rows[0].error_detail, detail)
+
+    def test_a_label_may_not_ask_the_window_to_grow_for_it(self):
+        # Ellipsizing alone leaves the label claiming it needs the full width,
+        # and GTK sizes the window to what its labels claim.
+        source = inspect.getsource(FloatingWidget._label)
+        self.assertIn("set_max_width_chars(LINE_CHARS)", source)
+
+
 class SourceTests(unittest.TestCase):
     def test_the_local_snapshot_beats_asking_a_publisher_for_it(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -475,9 +526,13 @@ class ControlFlagTests(unittest.TestCase):
         self.assertTrue(build_parser().parse_args(["--stop"]).stop)
         self.assertTrue(build_parser().parse_args(["--toggle"]).toggle)
 
-    def test_the_scale_menu_offers_the_larger_sizes(self):
+    def test_the_scale_menu_runs_from_tiny_to_double(self):
         source = inspect.getsource(FloatingWidget._popup_menu)
-        self.assertIn("(0.8, 1.0, 1.3, 1.5, 2.0)", source)
+        self.assertIn("(0.3, 0.5, 0.8, 1.0, 1.3, 1.5, 2.0)", source)
+
+    def test_the_smallest_offered_size_is_actually_reachable(self):
+        # An option the clamp refuses is an option that silently does nothing.
+        self.assertLessEqual(MIN_SCALE, 0.3)
 
     def test_minimising_gives_up_the_utility_hint_and_the_taskbar_one(self):
         # Mutter offers no minimise action for a utility window, so a window
