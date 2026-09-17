@@ -525,6 +525,35 @@ def _parse_iso8601(value: Optional[str]) -> Optional[float]:
     return parsed.timestamp()
 
 
+def relative_time(seconds: float, text: Mapping[str, str]) -> str:
+    """Spell a duration the way every surface here spells it.
+
+    The float widget and the terminal view both put countdowns on screen, and
+    two spellings of the same three hours on the same desk read as two
+    different numbers.
+    """
+
+    if seconds <= 0:
+        return text["expired"]
+    days, rest = divmod(int(seconds), 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes = rest // 60
+    parts: List[str] = []
+    if days:
+        parts.append(f"{days} {text['day']}")
+    if hours:
+        parts.append(f"{hours} {text['hour']}")
+    if minutes or not parts:
+        parts.append(f"{minutes} {text['minute']}")
+    return " ".join(parts[:2]) + text["after"]
+
+
+def age_text(seconds: float, text: Mapping[str, str]) -> str:
+    """How long ago, which is the same words without the "from now"."""
+
+    return relative_time(seconds, text).removesuffix(text["after"])
+
+
 class TerminalRenderer:
     RESET = "\033[0m"
 
@@ -569,22 +598,10 @@ class TerminalRenderer:
         return datetime.fromtimestamp(timestamp).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
 
     def _relative_time(self, seconds: float) -> str:
-        if seconds <= 0:
-            return self.text["expired"]
-        days, rest = divmod(int(seconds), 86400)
-        hours, rest = divmod(rest, 3600)
-        minutes = rest // 60
-        parts: List[str] = []
-        if days:
-            parts.append(f"{days} {self.text['day']}")
-        if hours:
-            parts.append(f"{hours} {self.text['hour']}")
-        if minutes or not parts:
-            parts.append(f"{minutes} {self.text['minute']}")
-        return " ".join(parts[:2]) + self.text["after"]
+        return relative_time(seconds, self.text)
 
     def _age(self, seconds: float) -> str:
-        return self._relative_time(seconds).removesuffix(self.text["after"])
+        return age_text(seconds, self.text)
 
     def _color_for(self, used_percent: int) -> str:
         return self.theme_color(used_percent, self.theme)

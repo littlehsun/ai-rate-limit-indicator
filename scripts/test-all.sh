@@ -57,7 +57,7 @@ echo "=== Dashboard ==="
 (
     cd "$ROOT_DIR/dashboard"
     PYTHONPATH="$PWD" python3 -m unittest discover -s tests -v
-    python3 -m py_compile usage_monitor.py usage_web.py
+    python3 -m py_compile usage_monitor.py usage_web.py usage_float.py
 )
 
 echo

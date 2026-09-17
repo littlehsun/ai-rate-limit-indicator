@@ -10,6 +10,7 @@ unit yet, so it is started by hand.
 dashboard/
 ├── usage_monitor.py   terminal monitor + the shared data layer
 ├── usage_web.py       the same data as a web page
+├── usage_float.py     the same data as a floating desktop widget
 ├── config.ini         endpoint, theme, language, per-provider switches
 ├── themes/            palettes, loaded through themes.ini
 └── tests/
@@ -22,8 +23,8 @@ From the snapshot `publish.py` serves, never from the provider APIs:
 ```
 provider APIs → desktop indicator → snapshots.json → publish.py :8477
                                                           ↓
-                                      ┌───────────────────┼───────────────────┐
-                                  iOS widget         usage_monitor        usage_web
+                          ┌───────────────┬───────────────┼───────────────┐
+                      iOS widget    usage_monitor     usage_web      usage_float
 ```
 
 That is the whole point of reading it this way. No credential is needed here, no
@@ -79,6 +80,49 @@ often offline-ish, and a CDN round trip is exactly what leaves it blank.
 
 Every tab and widget pointed at one server shares a single snapshot behind a 20s
 TTL, so ten viewers cost the publisher one request rather than ten.
+
+## Floating desktop widget
+
+A frameless always-on-top window that sits on the desktop, on every workspace,
+wherever it was dragged. It is the same numbers the terminal shows, in the place
+you actually look while a long agent run is spending them.
+
+```bash
+python3 usage_float.py                        # where config.ini says
+python3 usage_float.py --compact              # one bar per provider
+python3 usage_float.py --theme nord --language en --scale 1.25
+python3 usage_float.py --providers claude,codex --opacity 0.7
+python3 usage_float.py --x 40 --y 40          # place it, once
+python3 usage_float.py --reset-position       # forget where it was
+```
+
+| Gesture | |
+|---|---|
+| Left-drag anywhere | move it; the position is remembered |
+| Right-click | compact, opacity, text size, theme, language, autostart, quit |
+| Scroll | opacity, in 5% steps |
+
+Full mode gives every window a bar, a percentage and a reset countdown, with a
+provider's extras and errors underneath. Compact mode keeps each provider's lead
+window only — always the weekly one, so four bars of the same width are
+measuring the same thing.
+
+Settings live in `[float]` in `config.ini`; `endpoint`, `theme`, `language`,
+`interval` and the provider switches are the shared ones above. What you change
+from the menu — position, compact, opacity, scale, on top — is remembered in
+`~/.local/state/rate-limit-indicator/float.json` rather than written back into
+`config.ini`, so the file you hand-edit stays yours.
+
+To have it come back at login:
+
+```bash
+python3 usage_float.py --autostart install    # or remove, or status
+```
+
+Linux and GTK 3 only (`python3-gi`, `gir1.2-gtk-3.0` — the same bindings the
+GNOME indicator already needs). macOS has the native menu-bar app instead. On
+Wayland the widget works, but the compositor owns window placement: it will not
+be restored to a saved position, and `--x`/`--y` do nothing.
 
 ## Themes
 
@@ -152,11 +196,16 @@ track; the label beside it is what tells the two apart.
 cd dashboard && PYTHONPATH="$PWD" python3 -m unittest discover -s tests
 ```
 
-42 tests, no network: the fetch layer takes an injected opener.
+75 tests, no network and no display: the fetch layer takes an injected opener,
+and everything above `usage_float.py`'s GTK layer is plain data.
 
 ## Known gaps
 
-- No installer and no service unit. Run it by hand.
+- No installer and no service unit. Run it by hand, or let `usage_float.py
+  --autostart install` bring the widget back at login.
+- The widget's theme and language menus last for the session only: they are
+  shared settings, and a widget quietly rewriting `config.ini` would change the
+  terminal view too.
 - `usage_web.py` binds loopback by default. `--bind` to a tailnet address is
   untested and `publish.py` has a deliberate refuse-to-wildcard guard that this
   does not copy.
