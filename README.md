@@ -300,7 +300,21 @@ local locations, and generated configuration/cache files are written under the
 user's home directory with restrictive permissions.
 
 The AGY adapter connects only to fixed loopback addresses. TLS verification is
-relaxed exclusively for AGY's self-signed localhost certificate.
+relaxed exclusively for AGY's self-signed localhost certificate, and each port
+is tried as both HTTPS and plain HTTP because AGY does not speak the same one
+on all of them.
+
+AGY now refuses a local request that carries no CSRF token. That token is
+minted per run, never written to disk, and not accepted from outside, so the
+adapter borrows it from the environment of a process AGY itself started --
+AGY exports `ANTIGRAVITY_CSRF_TOKEN` and `ANTIGRAVITY_LS_ADDRESS` to
+everything it spawns. Reading another process's environment is a strong thing
+to do, so the adapter reads only processes belonging to this user, looks only
+for those two variables, and never logs what it finds. `AGY_CSRF_TOKEN`
+supplies one by hand instead. This is Linux-only: /proc is where it lives, and
+its absence means no token rather than an error, so macOS keeps whatever the
+cache holds. With no token anywhere, Gemini is reported as needing one rather
+than as a dead endpoint.
 
 Claude OAuth credentials are read from Claude Code's existing
 `~/.claude/.credentials.json`. The indicator never stores or refreshes the

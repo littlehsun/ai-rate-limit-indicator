@@ -15,6 +15,18 @@ from typing import Any, Mapping, Optional
 
 
 QUOTA_PATH = "/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary"
+
+# AGY refuses a local request that carries no CSRF token, under this header
+# name. Nothing standard matches it, which is why a release that added the
+# check read as "the endpoint is down" from out here.
+CSRF_HEADER = "x-codeium-csrf-token"
+
+# The token is minted per run and never written to disk. AGY does put it in
+# the environment of every process it spawns, along with the address of the
+# language server it belongs to, and those processes are ours to read. That is
+# the only supply we have, and it is the same one AGY's own tooling uses.
+TOKEN_VARIABLE = "ANTIGRAVITY_CSRF_TOKEN"
+ADDRESS_VARIABLE = "ANTIGRAVITY_LS_ADDRESS"
 CLI_START_TIMEOUT = 30.0
 CLI_START_POLL_INTERVAL = 0.25
 CLI_START_COOLDOWN = 300.0
@@ -97,6 +109,75 @@ def read_cache(cache_path: Optional[Path] = None) -> Optional[AgyQuotaSnapshot]:
         return None
 
 
+@dataclass(frozen=True)
+class AgyCredentials:
+    """What a live AGY will accept a quota request with."""
+
+    token: str
+    address: Optional[str] = None
+
+    @property
+    def port(self) -> Optional[int]:
+        if not self.address:
+            return None
+        _, separator, port = self.address.rpartition(":")
+        return int(port) if separator and port.isdigit() else None
+
+
+def find_agy_credentials(proc_root: Optional[Path] = None) -> Optional[AgyCredentials]:
+    """Borrow the CSRF token from a process AGY started.
+
+    Reading another process's environment is a strong thing to do, so this
+    only ever reads processes belonging to this user, only looks for these two
+    variables, and never logs what it finds. The alternative is no Gemini
+    numbers at all: the token exists for one run of AGY, is never written
+    down, and is not accepted from the outside.
+
+    Linux only. /proc is where this lives, and its absence is a "no token"
+    rather than an error, so macOS keeps whatever the cache holds.
+    """
+
+    override = os.environ.get("AGY_CSRF_TOKEN", "").strip()
+    if override:
+        return AgyCredentials(
+            token=override, address=os.environ.get("AGY_LS_ADDRESS", "").strip() or None
+        )
+
+    root = proc_root or Path("/proc")
+    try:
+        entries = sorted(
+            (entry for entry in root.iterdir() if entry.name.isdigit()),
+            key=lambda entry: int(entry.name),
+        )
+    except OSError:
+        return None
+
+    uid = os.getuid()
+    for entry in entries:
+        try:
+            if entry.stat().st_uid != uid:
+                continue
+            raw = (entry / "environ").read_bytes()
+        except OSError:
+            # Processes come and go while this loop runs, and other users'
+            # are not ours to read. Both are ordinary.
+            continue
+        values = {}
+        for item in raw.split(b"\0"):
+            name, separator, value = item.partition(b"=")
+            if separator and name.decode("utf-8", "replace") in (
+                TOKEN_VARIABLE,
+                ADDRESS_VARIABLE,
+            ):
+                values[name.decode("utf-8", "replace")] = value.decode("utf-8", "replace")
+        token = values.get(TOKEN_VARIABLE, "").strip()
+        if token:
+            return AgyCredentials(
+                token=token, address=values.get(ADDRESS_VARIABLE, "").strip() or None
+            )
+    return None
+
+
 def find_agy_ports() -> tuple[int, ...]:
     try:
         processes = subprocess.run(
@@ -153,47 +234,149 @@ def find_agy_ports() -> tuple[int, ...]:
     return tuple(ports)
 
 
+# AGY listens on more than one local port and does not speak the same thing on
+# all of them: one is TLS, another is plain HTTP. Which is which changes
+# between releases, so both are tried rather than guessed at.
+SCHEMES = ("https", "http")
+
+# How much a failure is worth saying out loud. A server that answered knows
+# why it refused us; a transport error only knows it could not ask. The
+# "wrong version number" from sending TLS to a plaintext port is the least
+# informative of all -- it is this function's own doing, not a fault -- and
+# reporting it is what hid a plain 401 for a whole release.
+ERROR_ANSWERED = 3
+ERROR_TRANSPORT = 2
+ERROR_WRONG_SCHEME = 1
+
+
+def _error_rank(exc: Exception) -> int:
+    if isinstance(exc, urllib.error.HTTPError):
+        return ERROR_ANSWERED
+    if isinstance(exc, ssl.SSLError) or isinstance(
+        getattr(exc, "reason", None), ssl.SSLError
+    ):
+        return ERROR_WRONG_SCHEME
+    return ERROR_TRANSPORT
+
+
+def describe_error(exc: Exception) -> str:
+    """What to show for a failed attempt, preferring the server's own words.
+
+    A Connect RPC refusal carries a JSON body saying what was wrong -- a
+    missing CSRF token, an expired session -- and that sentence is the whole
+    reason anybody reads this message. Without it the reader gets "HTTP Error
+    401: Unauthorized", which says who refused but not what to do.
+    """
+
+    if isinstance(exc, urllib.error.HTTPError):
+        detail = ""
+        try:
+            body = json.loads(exc.read().decode("utf-8"))
+            message = body.get("message") or body.get("code")
+            detail = f" {message}" if message else ""
+        except (AttributeError, ValueError, OSError, json.JSONDecodeError):
+            detail = ""
+        return f"HTTP {exc.code}{detail}"
+    return str(exc)
+
+
+def quota_ports(
+    ports: Optional[tuple[int, ...]] = None,
+    credentials: Optional[AgyCredentials] = None,
+) -> tuple[int, ...]:
+    """The ports to try, with the one the token belongs to first.
+
+    AGY listens on several, and the token is minted for the language server at
+    ANTIGRAVITY_LS_ADDRESS. Trying that one first is what turns four requests
+    into one.
+    """
+
+    found = tuple(ports or find_agy_ports())
+    port = credentials.port if credentials else None
+    if port is None:
+        return found
+    return (port,) + tuple(other for other in found if other != port)
+
+
+def quota_headers(credentials: Optional[AgyCredentials], base: str) -> dict[str, str]:
+    headers = {
+        "Content-Type": "application/json",
+        "Connect-Protocol-Version": "1",
+    }
+    if credentials:
+        # Origin and Referer ride along because AGY's own client sends them,
+        # and a CSRF check that is satisfied by a header alone today may well
+        # want the pair tomorrow.
+        headers[CSRF_HEADER] = credentials.token
+        headers["Origin"] = base
+        headers["Referer"] = base + "/"
+    return headers
+
+
 def fetch_quota_snapshot(
     ports: Optional[tuple[int, ...]] = None,
     *,
     timeout: float = 3.0,
+    credentials: Optional[AgyCredentials] = None,
 ) -> AgyQuotaSnapshot:
-    candidates = ports or find_agy_ports()
+    credentials = credentials or find_agy_credentials()
+    candidates = quota_ports(ports, credentials)
     context = ssl.create_default_context()
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE
     payload = json.dumps({"forceRefresh": True}).encode("utf-8")
-    last_error: Optional[Exception] = None
+    best_error: Optional[Exception] = None
+    best_rank = 0
 
     for port in candidates:
-        request = urllib.request.Request(
-            f"https://127.0.0.1:{port}{QUOTA_PATH}",
-            data=payload,
-            headers={
-                "Content-Type": "application/json",
-                "Connect-Protocol-Version": "1",
-            },
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(
-                request, timeout=timeout, context=context
-            ) as response:
-                body = json.loads(response.read().decode("utf-8"))
-            snapshot = parse_quota_payload(body)
-            if snapshot.windows:
-                return snapshot
-        except (
-            OSError,
-            TimeoutError,
-            ValueError,
-            json.JSONDecodeError,
-            urllib.error.URLError,
-        ) as exc:
-            last_error = exc
+        for scheme in SCHEMES:
+            base = f"{scheme}://127.0.0.1:{port}"
+            request = urllib.request.Request(
+                f"{base}{QUOTA_PATH}",
+                data=payload,
+                headers=quota_headers(credentials, base),
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(
+                    request, timeout=timeout, context=context
+                ) as response:
+                    body = json.loads(response.read().decode("utf-8"))
+                snapshot = parse_quota_payload(body)
+                if snapshot.windows:
+                    return snapshot
+            except (
+                OSError,
+                TimeoutError,
+                ValueError,
+                json.JSONDecodeError,
+                urllib.error.URLError,
+            ) as exc:
+                rank = _error_rank(exc)
+                # Ties keep the first: the ports come back in listening order,
+                # and the first one to answer is the one to talk about.
+                if rank > best_rank:
+                    best_error, best_rank = exc, rank
 
-    detail = f": {last_error}" if last_error else ""
-    raise RuntimeError(f"AGY quota endpoint is unavailable{detail}")
+    if best_error is None:
+        raise RuntimeError("AGY quota endpoint is unavailable")
+    # Described once: an HTTPError's body is a stream, and reading it twice
+    # gets an empty string the second time.
+    description = describe_error(best_error)
+    if credentials is None and _is_csrf_refusal(best_error, description):
+        # Naming the cause is the difference between "AGY is broken" and "open
+        # AGY once, so that something it starts is carrying the token".
+        raise RuntimeError("AGY quota needs a CSRF token; none is available yet")
+    return_message = f"AGY quota endpoint is unavailable: {description}"
+    raise RuntimeError(return_message)
+
+
+def _is_csrf_refusal(exc: Exception, description: str) -> bool:
+    return (
+        isinstance(exc, urllib.error.HTTPError)
+        and exc.code == 401
+        and "CSRF" in description.upper()
+    )
 
 
 def default_start_stamp_path() -> Path:

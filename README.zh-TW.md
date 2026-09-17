@@ -139,7 +139,17 @@ Collector 只會讀取各 CLI 原本的本機認證位置；產生的設定與 c
 使用者家目錄，並使用限制權限。
 
 AGY adapter 只會連線至 loopback address。因為 AGY 使用 localhost
-self-signed certificate，TLS 驗證只會針對固定的本機 endpoint 放寬。
+self-signed certificate，TLS 驗證只會針對固定的本機 endpoint 放寬；每個 port
+都會分別以 HTTPS 與純 HTTP 各試一次，因為 AGY 並非每個 port 都講同一種協定。
+
+AGY 現在會拒絕沒有帶 CSRF token 的本機請求。該 token 每次執行重新產生、不寫入
+磁碟，也不接受外部指定，因此 adapter 從 AGY 自己啟動的行程環境變數借用 ——
+AGY 會把 `ANTIGRAVITY_CSRF_TOKEN` 與 `ANTIGRAVITY_LS_ADDRESS` 傳給它產生的
+所有子行程。讀取其他行程的環境變數是相當強的行為，所以 adapter 只讀屬於本使用者
+的行程、只找這兩個變數，而且不會記錄讀到的內容。也可以用 `AGY_CSRF_TOKEN`
+自行提供。這只在 Linux 有效：它依賴 /proc，沒有 /proc 就視為沒有 token 而非
+錯誤，macOS 會沿用既有 cache。完全找不到 token 時，Gemini 會顯示為缺少 token，
+而不是 endpoint 掛掉。
 
 Claude OAuth credential 會直接讀取 Claude Code 現有的
 `~/.claude/.credentials.json`；indicator 不會自行保存或更新 access token。
