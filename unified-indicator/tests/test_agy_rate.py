@@ -11,7 +11,11 @@ from unittest import mock
 from agy_rate import (
     ADDRESS_VARIABLE,
     credential_attempts,
+    find_agy_pids,
     find_all_agy_credentials,
+    forget_credentials,
+    recall_credentials,
+    remember_credentials,
     CSRF_HEADER,
     TOKEN_VARIABLE,
     AgyCredentials,
@@ -578,3 +582,110 @@ class AutoStartTests(unittest.TestCase):
                         sleep=slept.append,
                     )
         self.assertTrue(slept)
+
+
+class RememberedTokenTests(unittest.TestCase):
+    """Holding a token for as long as the AGY run that minted it lasts.
+
+    The token lives in the environment of the processes AGY handed it to, and
+    those exit. Without this, Gemini goes dark the moment the last one does,
+    with Antigravity still open in front of the user.
+    """
+
+    def setUp(self):
+        forget_credentials()
+        self.addCleanup(forget_credentials)
+
+    def test_nothing_is_remembered_to_begin_with(self):
+        self.assertIsNone(recall_credentials((123,)))
+
+    def test_a_token_survives_the_process_that_carried_it(self):
+        credentials = AgyCredentials(token="live", address="localhost:44563")
+        remember_credentials(credentials, (4242,))
+        # The ssh session that held it is gone; AGY itself is not.
+        self.assertEqual(recall_credentials((4242,)), credentials)
+
+    def test_a_restarted_agy_does_not_get_the_old_token(self):
+        remember_credentials(AgyCredentials(token="old"), (4242,))
+        self.assertIsNone(recall_credentials((5555,)))
+
+    def test_agy_closing_takes_the_token_with_it(self):
+        remember_credentials(AgyCredentials(token="old"), (4242,))
+        self.assertIsNone(recall_credentials(()))
+
+    def test_a_working_token_is_remembered(self):
+        payload = {
+            "response": {
+                "groups": [
+                    {
+                        "displayName": "Gemini Models",
+                        "buckets": [
+                            {
+                                "bucketId": "gemini-5h",
+                                "displayName": "Five Hour Limit",
+                                "remainingFraction": 0.5,
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+
+        class Response:
+            def read(self):
+                return json.dumps(payload).encode("utf-8")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        held = (AgyCredentials(token="live", address="localhost:44563"),)
+        with mock.patch("agy_rate.find_agy_pids", return_value=(4242,)):
+            with mock.patch("agy_rate.find_all_agy_credentials", return_value=held):
+                with mock.patch("agy_rate.urllib.request.urlopen", return_value=Response()):
+                    fetch_quota_snapshot(ports=(44563,))
+        self.assertEqual(recall_credentials((4242,)).token, "live")
+
+    def test_a_remembered_token_is_offered_when_no_process_has_one(self):
+        remember_credentials(AgyCredentials(token="live", address="localhost:44563"), (4242,))
+        sent = []
+
+        def opener(request, *_args, **_kwargs):
+            sent.append(request.headers)
+            raise urllib.error.URLError("nope")
+
+        with mock.patch("agy_rate.find_agy_pids", return_value=(4242,)):
+            with mock.patch("agy_rate.find_all_agy_credentials", return_value=()):
+                with mock.patch("agy_rate.urllib.request.urlopen", side_effect=opener):
+                    with self.assertRaises(RuntimeError):
+                        fetch_quota_snapshot(ports=(44563,))
+        # urllib stores header names capitalised, so compare in one case.
+        tokens_sent = [
+            value
+            for headers in sent
+            for name, value in headers.items()
+            if name.lower() == CSRF_HEADER
+        ]
+        self.assertEqual(set(tokens_sent), {"live"})
+
+    def test_a_refused_token_is_not_offered_again(self):
+        remember_credentials(AgyCredentials(token="stale", address="localhost:44563"), (4242,))
+        refusal = urllib.error.HTTPError(
+            "http://127.0.0.1:1/x", 401, "Unauthorized", {},
+            io.BytesIO(b'{"code":"unauthenticated","message":"invalid CSRF token"}'),
+        )
+        with mock.patch("agy_rate.find_agy_pids", return_value=(4242,)):
+            with mock.patch("agy_rate.find_all_agy_credentials", return_value=()):
+                with mock.patch("agy_rate.urllib.request.urlopen", side_effect=refusal):
+                    with self.assertRaises(RuntimeError):
+                        fetch_quota_snapshot(ports=(44563,))
+        self.assertIsNone(recall_credentials((4242,)))
+
+    def test_a_live_process_token_is_not_displaced_by_the_remembered_one(self):
+        remembered = AgyCredentials(token="remembered", address="localhost:44563")
+        remember_credentials(remembered, (4242,))
+        live = AgyCredentials(token="live", address="localhost:44563")
+        attempts = credential_attempts((44563,), (live, remembered))
+        self.assertEqual(attempts[0][1], live)

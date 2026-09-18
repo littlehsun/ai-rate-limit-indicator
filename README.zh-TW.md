@@ -157,6 +157,12 @@ token 會隨著鑄造它的那次 AGY 執行一起失效，但被交付 token �
 那一把排到最前面。全部都被拒絕時，訊息會說這些 token 來自先前的執行，而不是丟出
 HTTP 401。
 
+可用的 token 會保留在記憶體中，直到它所屬的那個 Antigravity 行程結束為止。帶著
+token 的行程會消失 —— AGY 開的 shell、它啟動的 ssh —— 沒有這層保留的話，最後一個
+消失時 Gemini 就會斷掉，即使 Antigravity 還開在你面前。只存在記憶體：寫進磁碟會讓
+token 活得比鑄造它的那次執行還久；Antigravity 重啟後會換新的，因為綁定的 pid 已經
+不在了。
+
 `AGY_AUTO_START` 已經無法取得 quota。它仍然會啟動 `agy models`，那次執行也仍會
 開幾秒鐘的 quota port，但它鑄的 token 不會交給任何行程，也不接受外部指定，所以
 再怎麼等都會被拒絕。auto-start 現在會辨識這種拒絕並提早放棄，不再佔住 poll

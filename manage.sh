@@ -229,8 +229,10 @@ install_manager() {
         printf 'MOBILE_PUBLISH=false\n' >> "$CONFIG_FILE"
     fi
     if ! has_config_assignment AGY_AUTO_START; then
-        printf '\n# true opts in to running `agy models` when Antigravity is not\n' >> "$CONFIG_FILE"
-        printf '# listening, which serves Gemini quota for the few seconds it runs.\n' >> "$CONFIG_FILE"
+        printf '\n# Dead since Antigravity 1.2.2: the run this starts serves quota\n' >> "$CONFIG_FILE"
+        printf '# for a few seconds but demands a CSRF token it hands to nothing,\n' >> "$CONFIG_FILE"
+        printf '# so the request is always refused. Kept as a switch in case a\n' >> "$CONFIG_FILE"
+        printf '# later Antigravity makes the run it starts readable again.\n' >> "$CONFIG_FILE"
         printf 'AGY_AUTO_START=false\n' >> "$CONFIG_FILE"
     fi
     if ! has_config_assignment DISPLAY_MODE; then

@@ -277,10 +277,10 @@ If the publisher is unreachable the widget keeps the last snapshot it fetched
 and marks it, rather than blanking.
 
 Gemini updates roughly an order of magnitude less often than the others, by
-design. Antigravity only serves quota while it runs, and `AGY_AUTO_START`
-starts it only once the cached snapshot has gone stale at ten minutes, so
-spawning a process cannot be worth numbers already in hand. Expect Gemini's
-figures to trail the rest by up to that long; it is not stuck.
+design: Antigravity only serves quota while it runs. Expect Gemini's figures
+to trail the rest, and to stop moving entirely while Antigravity is closed;
+it is not stuck. `AGY_AUTO_START` used to cover that gap by starting
+Antigravity itself, and cannot any more -- see the CSRF note under Security.
 
 Antigravity also drops a window once its quota is spent — the bucket comes back
 marked `disabled` and is skipped — so a provider's window count can change
@@ -319,6 +319,14 @@ holding one nothing will accept again. So every token on the machine is
 collected, newest process first, and the one naming a port AGY is listening
 on right now goes first. When all of them are refused, the message says they
 are from earlier runs rather than reporting an HTTP 401.
+
+A token that works is kept in memory for as long as the Antigravity process
+it belongs to keeps running. The processes carrying a token exit -- a shell
+AGY opened, an ssh session it started -- and without this Gemini would go
+dark the moment the last one did, with Antigravity still open in front of
+you. It is memory only: writing a token to disk would give it a life longer
+than the run it came from, and a restarted Antigravity gets a fresh one
+because the pid it is held against is gone.
 
 `AGY_AUTO_START` can no longer serve quota. It still starts `agy models`, and
 that run still opens a quota port for a few seconds, but the run mints a token

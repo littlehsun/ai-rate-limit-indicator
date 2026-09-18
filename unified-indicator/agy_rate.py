@@ -210,7 +210,53 @@ def find_all_agy_credentials(
     return tuple(found)
 
 
-def find_agy_ports() -> tuple[int, ...]:
+@dataclass(frozen=True)
+class RememberedCredentials:
+    """A token, and the AGY processes that were running when it worked."""
+
+    credentials: AgyCredentials
+    pids: frozenset[int]
+
+
+# A token is good for the whole AGY run that minted it, but it only exists in
+# the environment of the processes that run handed it to -- and those come and
+# go. A tray that polls for hours would otherwise lose Gemini the moment the
+# last of them exits, with Antigravity still open in front of the user. So the
+# one that worked is kept here, for as long as the AGY process it belongs to
+# is still running. In memory only: a token outlives nothing here, and writing
+# one to disk would give it a life longer than the run it came from.
+_remembered: Optional[RememberedCredentials] = None
+
+
+def remember_credentials(
+    credentials: AgyCredentials, pids: tuple[int, ...]
+) -> None:
+    global _remembered
+    _remembered = RememberedCredentials(
+        credentials=credentials, pids=frozenset(pids)
+    )
+
+
+def recall_credentials(pids: tuple[int, ...]) -> Optional[AgyCredentials]:
+    """The remembered token, if its own AGY run is still going.
+
+    "Its own run" is the point. A restarted Antigravity mints a fresh token
+    and refuses the old one, and its new pid is what says so.
+    """
+
+    if _remembered is None or not _remembered.pids.intersection(pids):
+        return None
+    return _remembered.credentials
+
+
+def forget_credentials() -> None:
+    global _remembered
+    _remembered = None
+
+
+def find_agy_pids() -> tuple[int, ...]:
+    """The running AGY processes. Empty is "not running", not an error."""
+
     try:
         processes = subprocess.run(
             ["pgrep", "-x", "agy"],
@@ -221,15 +267,20 @@ def find_agy_ports() -> tuple[int, ...]:
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise RuntimeError(f"cannot find the AGY process: {exc}") from exc
+    return tuple(
+        int(line.strip())
+        for line in processes.stdout.splitlines()
+        if line.strip().isdigit()
+    )
 
-    pids = [
-        line.strip() for line in processes.stdout.splitlines() if line.strip().isdigit()
-    ]
-    if not pids:
+
+def find_agy_ports(pids: Optional[tuple[int, ...]] = None) -> tuple[int, ...]:
+    found = find_agy_pids() if pids is None else pids
+    if not found:
         raise RuntimeError("AGY is not running")
 
     ports: list[int] = []
-    for pid in pids:
+    for pid in (str(value) for value in found):
         try:
             result = subprocess.run(
                 [
@@ -379,8 +430,20 @@ def fetch_quota_snapshot(
     timeout: float = 3.0,
     credentials: Optional[AgyCredentials] = None,
 ) -> AgyQuotaSnapshot:
-    held = (credentials,) if credentials else find_all_agy_credentials()
-    attempts = credential_attempts(tuple(ports or find_agy_ports()), held)
+    pids = find_agy_pids()
+    if credentials:
+        held = (credentials,)
+    else:
+        held = find_all_agy_credentials()
+        # The remembered one is a fallback, not a favourite: a token found in
+        # a live process is the better evidence, and ordering by live port
+        # sorts the rest out.
+        recalled = recall_credentials(pids)
+        if recalled and all(
+            recalled.token != candidate.token for candidate in held
+        ):
+            held = held + (recalled,)
+    attempts = credential_attempts(tuple(ports or find_agy_ports(pids)), held)
     context = ssl.create_default_context()
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE
@@ -404,6 +467,8 @@ def fetch_quota_snapshot(
                     body = json.loads(response.read().decode("utf-8"))
                 snapshot = parse_quota_payload(body)
                 if snapshot.windows:
+                    if credential is not None:
+                        remember_credentials(credential, pids)
                     return snapshot
             except (
                 OSError,
@@ -424,6 +489,9 @@ def fetch_quota_snapshot(
     # gets an empty string the second time.
     description = describe_error(best_error)
     if _is_csrf_refusal(best_error, description) and "INVALID" in description.upper():
+        # Everything we hold is refused, including whatever was remembered, so
+        # keeping it only means offering it again next minute.
+        forget_credentials()
         # Every token we hold was refused, so they belong to AGY runs that
         # have ended. Saying so beats "HTTP 401", which reads as a fault.
         raise RuntimeError("AGY refused every CSRF token we hold; they are from earlier runs")
