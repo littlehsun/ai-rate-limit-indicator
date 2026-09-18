@@ -23,6 +23,7 @@ import configparser
 import errno
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -436,6 +437,23 @@ ERROR_CHARS = 42
 LINE_CHARS = 34
 
 
+# A provider's extras carry one line per reset credit, each naming the date it
+# expires. The count is what you act on -- whether to spend one now -- and the
+# dates are reference, which is what the tray's dropdown is for. On a widget
+# they are four lines of calendar nobody reads, so they come off the face and
+# go into the tooltip of the line they belong to.
+EXPIRY_EXTRA = re.compile(r"^\s*\d+\.\s")
+
+
+def split_extras(extras: Sequence[str]) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
+    """The extras worth a line, and the ones worth a tooltip."""
+
+    visible, detail = [], []
+    for extra in extras:
+        (detail if EXPIRY_EXTRA.match(extra) else visible).append(extra)
+    return tuple(visible), tuple(detail)
+
+
 # What a provider that is not reporting cleanly gets instead of a word. The
 # healthy case earns no mark at all: four rows each saying "fresh" is four
 # rows of noise, and the eye stops reading a label that never changes.
@@ -451,6 +469,7 @@ class ProviderRow:
     fresh: bool
     windows: Tuple[WindowRow, ...]
     extras: Tuple[str, ...]
+    extras_detail: Tuple[str, ...]
     error: Optional[str]
     error_detail: Optional[str]
 
@@ -534,6 +553,7 @@ def build_provider_row(
             fresh=False,
             windows=(),
             extras=(text["missing"],),
+            extras_detail=(),
             error=None,
             error_detail=None,
         )
@@ -543,6 +563,7 @@ def build_provider_row(
     # the one that is comparable across all four.
     if compact:
         windows = windows[:1]
+    extras, extras_detail = ((), ()) if compact else split_extras(provider.extras)
     return ProviderRow(
         provider=provider.provider,
         label=provider.label,
@@ -552,7 +573,8 @@ def build_provider_row(
         windows=tuple(
             build_window_row(window, now=now, text=text) for window in windows
         ),
-        extras=() if compact else tuple(provider.extras),
+        extras=extras,
+        extras_detail=extras_detail,
         error=short_error(provider.error) or None,
         error_detail=provider.error,
     )
@@ -971,7 +993,10 @@ class FloatingWidget:
         for window in row.windows:
             box.pack_start(self._window_box(window, labels), False, False, 0)
         for extra in row.extras:
-            box.pack_start(self._label(extra, "float-muted"), False, False, 0)
+            line = self._label(extra, "float-muted")
+            if row.extras_detail:
+                line.set_tooltip_text("\n".join(row.extras_detail))
+            box.pack_start(line, False, False, 0)
         if row.error:
             message = self._label(row.error, "float-danger")
             message.set_tooltip_text(row.error_detail)

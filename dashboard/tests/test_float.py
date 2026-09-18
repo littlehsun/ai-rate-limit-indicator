@@ -37,6 +37,7 @@ from usage_float import (
     running_pid,
     stop_float,
     short_error,
+    split_extras,
     state_from,
     status_text,
     strings_for,
@@ -145,6 +146,37 @@ class RowTests(unittest.TestCase):
         )
         self.assertEqual(len(rows[0].windows), 2)
         self.assertEqual(rows[0].extras, ("credits expire in 3 days",))
+
+    def test_the_credit_count_stays_and_its_expiry_dates_go_to_the_tooltip(self):
+        # The count is what you act on. Four dates below it are calendar
+        # nobody reads at a glance, and the tray dropdown still has them.
+        codex = provider(
+            "codex",
+            extras=(
+                "Reset credits: 2",
+                "1. expires 2026-10-04 13:39",
+                "2. expires 2026-10-05 12:21",
+            ),
+        )
+        rows = build_rows(
+            snapshot(codex), ("codex",), now=0.0, text=self.text, compact=False
+        )
+        self.assertEqual(rows[0].extras, ("Reset credits: 2",))
+        self.assertEqual(len(rows[0].extras_detail), 2)
+
+    def test_an_extra_that_is_not_an_expiry_line_stays_on_the_face(self):
+        for extra in ("GrokBuild: 100%", "Reset credits: --", "AGY is not running"):
+            with self.subTest(extra=extra):
+                visible, detail = split_extras((extra,))
+                self.assertEqual(visible, (extra,))
+                self.assertEqual(detail, ())
+
+    def test_only_the_numbered_expiry_lines_are_moved(self):
+        visible, detail = split_extras(
+            ("Reset credits: 2", "1. expires soon", "10. expires later")
+        )
+        self.assertEqual(visible, ("Reset credits: 2",))
+        self.assertEqual(detail, ("1. expires soon", "10. expires later"))
 
     def test_compact_mode_drops_the_extras(self):
         codex = provider("codex", extras=("credits expire in 3 days",))

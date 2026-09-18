@@ -150,7 +150,10 @@ Clicking the launcher (`AI Usage Float`, pin it to the dock) brings a minimised
 widget back, as does the tray switch.
 
 Full mode gives every window a bar, a percentage and a reset countdown, with a
-provider's extras and errors underneath. Compact mode keeps each provider's lead
+provider's extras and errors underneath. Codex's reset credits keep their
+count and lose their expiry dates to the tooltip: the count is what you act
+on, the dates are reference, and four lines of calendar is not what a widget
+is for. The tray dropdown still lists them. Compact mode keeps each provider's lead
 window only — always the weekly one, so four bars of the same width are
 measuring the same thing.
 
