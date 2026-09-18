@@ -31,8 +31,12 @@ ADDRESS_VARIABLE = "ANTIGRAVITY_LS_ADDRESS"
 # Shared by the two messages a CSRF refusal produces, so the auto-start path
 # can recognise its own defeat without matching on wording.
 CSRF_REFUSAL_MARKER = "CSRF token"
-CLI_START_TIMEOUT = 30.0
-CLI_START_POLL_INTERVAL = 0.25
+# The CLI's own usage screen, asked for as a slash command. It is handled
+# inside the CLI, takes no turn and spends no model quota.
+USAGE_COMMAND = "/usage"
+# Measured at 8 to 15 seconds cold on this machine, so the ceiling is generous
+# rather than tight: a run cut off halfway costs the whole cooldown.
+CLI_USAGE_TIMEOUT = 60.0
 CLI_START_COOLDOWN = 300.0
 
 
@@ -571,22 +575,79 @@ def find_agy_cli() -> Optional[str]:
     return None
 
 
+def parse_usage_command_payload(payload: Mapping[str, Any]) -> AgyQuotaSnapshot:
+    """Read the `/usage` command's JSON, which names the same buckets in snake case.
+
+    The command and the endpoint describe one thing: the same groups, the same
+    bucket ids, the same remaining fractions and reset times. Only the spelling
+    differs, so the payload is rewritten into the endpoint's shape rather than
+    parsed a second way -- everything downstream already agrees about what a
+    bucket means.
+    """
+
+    command = payload.get("command")
+    data = command.get("data") if isinstance(command, dict) else None
+    groups = data.get("groups") if isinstance(data, dict) else None
+    if not isinstance(groups, list):
+        raise RuntimeError("the agy usage command returned no quota groups")
+
+    rewritten = []
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        buckets = []
+        for bucket in group.get("buckets") or []:
+            if not isinstance(bucket, dict):
+                continue
+            buckets.append(
+                {
+                    "bucketId": bucket.get("id"),
+                    "displayName": bucket.get("name"),
+                    "remainingFraction": bucket.get("remaining_fraction"),
+                    "resetTime": bucket.get("reset_time"),
+                }
+            )
+        rewritten.append({"displayName": group.get("name"), "buckets": buckets})
+    return parse_quota_payload({"response": {"groups": rewritten}})
+
+
+def _run_usage_command(agy_bin: str, timeout: float) -> str:
+    result = subprocess.run(
+        (agy_bin, "-p", USAGE_COMMAND, "--output-format", "json"),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"agy {USAGE_COMMAND} exited {result.returncode}: "
+            f"{result.stderr.strip()[:200]}"
+        )
+    return result.stdout
+
+
 def fetch_quota_with_cli(
     *,
     enabled: Optional[bool] = None,
-    timeout: float = 3.0,
-    spawner: Optional[Any] = None,
+    timeout: float = CLI_USAGE_TIMEOUT,
+    runner: Optional[Any] = None,
     stamp_path: Optional[Path] = None,
     now: Optional[float] = None,
-    sleep: Any = time.sleep,
 ) -> Optional[AgyQuotaSnapshot]:
-    """Start the Antigravity CLI briefly and read quota while it listens.
+    """Ask the Antigravity CLI for its own usage screen.
 
-    `agy models` is used because it authenticates, opens the local quota server
-    within about a second, and spends no model quota. That server only lives for
-    the few seconds the command runs, so the read has to race it rather than
-    start it and come back later. A cold start also has to clear macOS keyring
-    authentication first, which is why the deadline is generous.
+    `agy -p /usage --output-format json` is a slash command, handled inside the
+    CLI: it reports `total_tokens: 0` and takes no turn, so it costs nothing
+    but the seconds it runs. It needs no CSRF token and no listening server,
+    which is what makes it the one way left to read Gemini quota while
+    Antigravity is closed -- the local endpoint has required a token since
+    Antigravity 1.2.2 that a run we start ourselves never reveals.
+
+    What it does cost is a process and the better part of ten seconds, so it
+    keeps the two gates of the spawn it replaces: an opt-in switch, and a
+    cooldown so that a CLI which cannot sign in does not earn a process on
+    every poll.
     """
 
     # Gemini has no poller of its own, so the switch reaches this module from
@@ -602,60 +663,23 @@ def fetch_quota_with_cli(
 
     now = time.time() if now is None else now
     stamp = stamp_path or default_start_stamp_path()
-    # Stamping before the spawn means a hang or a crash still counts, so a CLI
-    # that cannot sign in does not earn a process on every poll.
+    # Stamped before the run, so a hang or a crash counts the same as a refusal.
     if start_is_in_cooldown(stamp, now=now):
         return None
     record_start_attempt(stamp, now=now)
 
-    spawn = spawner or _spawn_agy_models
+    run = runner or _run_usage_command
     try:
-        process = spawn(agy_bin)
-    except Exception:
+        return parse_usage_command_payload(json.loads(run(agy_bin, timeout)))
+    except (
+        OSError,
+        ValueError,
+        RuntimeError,
+        subprocess.SubprocessError,
+    ):
+        # Every failure here means the same thing to the caller: no numbers
+        # this time, keep the cache.
         return None
-
-    try:
-        deadline = time.monotonic() + CLI_START_TIMEOUT
-        while True:
-            try:
-                return fetch_quota_snapshot(timeout=timeout)
-            except RuntimeError as exc:
-                # A run started this way mints a token and tells nobody: it
-                # spawns nothing to carry it, and it will not accept one we
-                # choose. Waiting out the deadline cannot change that, so the
-                # poll thread is given its half-minute back.
-                if CSRF_REFUSAL_MARKER in str(exc):
-                    return None
-                if time.monotonic() >= deadline:
-                    return None
-                sleep(CLI_START_POLL_INTERVAL)
-    finally:
-        _stop_process(process)
-
-
-def _spawn_agy_models(agy_bin: str) -> subprocess.Popen:
-    return subprocess.Popen(
-        (agy_bin, "models"),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
-
-def _stop_process(process: Any) -> None:
-    """Stop the CLI once its quota server has served its purpose."""
-
-    try:
-        if process.poll() is not None:
-            return
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
-    except Exception:
-        pass
 
 
 def _flag_enabled(value: Optional[str]) -> bool:

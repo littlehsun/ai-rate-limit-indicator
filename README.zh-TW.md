@@ -163,10 +163,13 @@ token 的行程會消失 —— AGY 開的 shell、它啟動的 ssh —— 沒�
 token 活得比鑄造它的那次執行還久；Antigravity 重啟後會換新的，因為綁定的 pid 已經
 不在了。
 
-`AGY_AUTO_START` 已經無法取得 quota。它仍然會啟動 `agy models`，那次執行也仍會
-開幾秒鐘的 quota port，但它鑄的 token 不會交給任何行程，也不接受外部指定，所以
-再怎麼等都會被拒絕。auto-start 現在會辨識這種拒絕並提早放棄，不再佔住 poll
-thread 整個 deadline。Gemini 需要 Antigravity 真的在執行，而且它啟動的行程還活著。
+以上是 Antigravity 開著的情況。關閉時，`AGY_AUTO_START` 會改為請 CLI 印出它自己的
+用量畫面，而不是打 endpoint：`agy -p /usage --output-format json`。這是 slash
+command，由 CLI 內部處理 —— 回應裡 `total_tokens: 0`、不佔用任何 turn —— 所以
+不需要 token、不需要監聽中的 server，也不花模型額度。代價是一個行程和將近十秒，
+因此保留它取代的那個機制的兩道閘門：開關，以及冷卻時間（避免一個無法登入的 CLI
+每次輪詢都換來一個行程）。啟動 Antigravity 本身已經沒有用，也不再嘗試：我們自己
+啟動的 run 鑄的 token 不交給任何人，也不接受外部指定。
 
 Claude OAuth credential 會直接讀取 Claude Code 現有的
 `~/.claude/.credentials.json`；indicator 不會自行保存或更新 access token。

@@ -328,12 +328,16 @@ you. It is memory only: writing a token to disk would give it a life longer
 than the run it came from, and a restarted Antigravity gets a fresh one
 because the pid it is held against is gone.
 
-`AGY_AUTO_START` can no longer serve quota. It still starts `agy models`, and
-that run still opens a quota port for a few seconds, but the run mints a token
-it hands to nothing and will not accept one chosen for it, so the request is
-refused however long we wait. The auto-start path now recognises that refusal
-and stops instead of holding a poll thread for its full deadline. Gemini needs
-Antigravity actually running, with something it started still alive. This is Linux-only: /proc is where it lives, and
+That covers a running Antigravity. For a closed one, `AGY_AUTO_START` asks
+the CLI for its own usage screen instead of the endpoint:
+`agy -p /usage --output-format json`. It is a slash command, handled inside
+the CLI -- it reports `total_tokens: 0` and takes no turn -- so it needs no
+token, no listening server and no model quota. It costs a process and the
+better part of ten seconds, so it stays behind the same two gates as the
+spawn it replaced: the switch, and a cooldown that keeps a CLI which cannot
+sign in from earning a process on every poll. Starting Antigravity itself no
+longer works and is not attempted: a run we start mints a token it hands to
+nothing and refuses one chosen for it. This is Linux-only: /proc is where it lives, and
 its absence means no token rather than an error, so macOS keeps whatever the
 cache holds. With no token anywhere, Gemini is reported as needing one rather
 than as a dead endpoint.

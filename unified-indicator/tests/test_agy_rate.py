@@ -10,6 +10,9 @@ from unittest import mock
 
 from agy_rate import (
     ADDRESS_VARIABLE,
+    CLI_START_COOLDOWN,
+    CLI_USAGE_TIMEOUT,
+    parse_usage_command_payload,
     credential_attempts,
     find_agy_pids,
     find_all_agy_credentials,
@@ -50,6 +53,59 @@ class FakeProcess:
 
     def wait(self, timeout=None):
         return 0
+
+
+def _bucket(bucket_id, name, remaining, reset):
+    return {
+        "id": bucket_id,
+        "name": name,
+        "remaining_fraction": remaining,
+        "reset_time": reset,
+    }
+
+
+# The shape `agy -p /usage --output-format json` actually returns.
+FULL_USAGE_PAYLOAD = {
+    "status": "SUCCESS",
+    "usage": {"total_tokens": 0},
+    "command": {
+        "name": "usage",
+        "data": {
+            "groups": [
+                {
+                    "name": "Gemini Models",
+                    "buckets": [
+                        _bucket("gemini-5h", "Five Hour Limit Remaining", 0.8954, "2026-09-18T11:00:36Z"),
+                        _bucket("gemini-weekly", "Weekly Limit Remaining", 0.1829, "2026-09-23T03:54:44Z"),
+                    ],
+                },
+                {
+                    "name": "Claude and GPT models",
+                    "buckets": [
+                        _bucket("3p-5h", "Five Hour Limit Remaining", 0.6964, "2026-09-18T11:01:14Z"),
+                        _bucket("3p-weekly", "Weekly Limit Remaining", 0.8988, "2026-09-25T06:01:14Z"),
+                    ],
+                },
+            ]
+        },
+    },
+}
+
+USAGE_COMMAND_PAYLOAD = {
+    "command": {
+        "data": {
+            "groups": [
+                {
+                    "name": "Gemini Models",
+                    "buckets": [
+                        _bucket("gemini-5h", "Five Hour Limit Remaining", 0.8954, "2026-09-18T11:00:36Z"),
+                        _bucket("gemini-weekly", "Weekly Limit Remaining", 0.1829, "2026-09-23T03:54:44Z"),
+                    ],
+                }
+            ]
+        }
+    }
+}
 
 
 class AgyRateTests(unittest.TestCase):
@@ -137,88 +193,100 @@ class AgyRateTests(unittest.TestCase):
             self.assertEqual(restored, snapshot)
             self.assertEqual(cache.stat().st_mode & 0o777, 0o600)
 
-    def test_starting_agy_stays_opt_in(self):
-        spawned = []
+    def test_asking_the_cli_stays_opt_in(self):
+        runs = []
         with mock.patch.dict(os.environ, {"AGY_AUTO_START": ""}, clear=False):
-            self.assertIsNone(fetch_quota_with_cli(spawner=spawned.append))
+            self.assertIsNone(
+                fetch_quota_with_cli(runner=lambda *args: runs.append(args) or "{}")
+            )
+        self.assertEqual(runs, [])
 
-        self.assertEqual(spawned, [])
+    def test_the_usage_command_is_what_gets_run(self):
+        runs = []
 
-    def test_starting_agy_reads_quota_then_stops_the_process(self):
-        snapshot = AgyQuotaSnapshot(
-            updated_at="2026-07-30T06:00:00+00:00",
-            windows=(AgyQuotaWindow("gemini", "Gemini", "5h", 3, 0.97, None),),
+        def runner(agy_bin, timeout):
+            runs.append((agy_bin, timeout))
+            return json.dumps(USAGE_COMMAND_PAYLOAD)
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+            os.environ, {"AGY_AUTO_START": "1"}
+        ), mock.patch("agy_rate.find_agy_cli", return_value="/usr/bin/agy"):
+            snapshot = fetch_quota_with_cli(
+                runner=runner, stamp_path=Path(tmp) / "stamp"
+            )
+
+        self.assertEqual(runs, [("/usr/bin/agy", CLI_USAGE_TIMEOUT)])
+        self.assertEqual(
+            [(w.group_id, w.cadence, w.used_percent) for w in snapshot.windows],
+            [("gemini", "5h", 10), ("gemini", "7d", 82)],
         )
-        process = FakeProcess()
-        # The server needs a moment to listen, so the read has to retry.
-        attempts = [RuntimeError("AGY is not running"), snapshot]
 
-        def fetch(**_kwargs):
-            result = attempts.pop(0)
-            if isinstance(result, Exception):
-                raise result
-            return result
-
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
-            os.environ, {"AGY_AUTO_START": "1"}
-        ), mock.patch("agy_rate.find_agy_cli", return_value="/usr/bin/agy"), mock.patch(
-            "agy_rate.fetch_quota_snapshot", side_effect=fetch
+    def test_a_command_that_fails_keeps_the_cache_rather_than_raising(self):
+        for failure in (
+            OSError("no such binary"),
+            RuntimeError("agy /usage exited 1"),
+            ValueError("not json"),
         ):
-            result = fetch_quota_with_cli(
-                spawner=lambda _bin: process,
-                stamp_path=Path(tmp) / "stamp",
-                sleep=lambda _seconds: None,
-            )
+            with self.subTest(failure=type(failure).__name__):
+                with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+                    os.environ, {"AGY_AUTO_START": "1"}
+                ), mock.patch("agy_rate.find_agy_cli", return_value="/usr/bin/agy"):
+                    self.assertIsNone(
+                        fetch_quota_with_cli(
+                            runner=mock.Mock(side_effect=failure),
+                            stamp_path=Path(tmp) / "stamp",
+                        )
+                    )
 
-        self.assertEqual(result, snapshot)
-        # Antigravity was only wanted for the read, so it does not linger.
-        self.assertTrue(process.terminated)
-
-    def test_starting_agy_gives_up_and_still_stops_the_process(self):
-        process = FakeProcess()
-        clock = iter([0.0, 0.0, 1_000.0])
-
+    def test_output_that_is_not_the_usage_screen_is_not_a_snapshot(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
             os.environ, {"AGY_AUTO_START": "1"}
-        ), mock.patch("agy_rate.find_agy_cli", return_value="/usr/bin/agy"), mock.patch(
-            "agy_rate.fetch_quota_snapshot",
-            side_effect=RuntimeError("AGY is not running"),
-        ), mock.patch("agy_rate.time.monotonic", side_effect=lambda: next(clock)):
-            result = fetch_quota_with_cli(
-                spawner=lambda _bin: process,
-                stamp_path=Path(tmp) / "stamp",
-                sleep=lambda _seconds: None,
-            )
-
-        self.assertIsNone(result)
-        self.assertTrue(process.terminated)
-
-    def test_starting_agy_waits_out_the_cooldown(self):
-        spawned = []
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
-            os.environ, {"AGY_AUTO_START": "1"}
-        ), mock.patch("agy_rate.find_agy_cli", return_value="/usr/bin/agy"), mock.patch(
-            "agy_rate.fetch_quota_snapshot",
-            side_effect=RuntimeError("AGY is not running"),
-        ), mock.patch("agy_rate.time.monotonic", side_effect=[0.0, 1_000.0] * 4):
-            stamp = Path(tmp) / "stamp"
-
-            def start(now):
-                return fetch_quota_with_cli(
-                    spawner=lambda _bin: spawned.append(_bin) or FakeProcess(),
-                    stamp_path=stamp,
-                    now=now,
-                    sleep=lambda _seconds: None,
+        ), mock.patch("agy_rate.find_agy_cli", return_value="/usr/bin/agy"):
+            self.assertIsNone(
+                fetch_quota_with_cli(
+                    runner=lambda *_args: json.dumps({"status": "SUCCESS"}),
+                    stamp_path=Path(tmp) / "stamp",
                 )
+            )
 
-            start(1_000.0)
-            self.assertEqual(len(spawned), 1)
+    def test_asking_the_cli_waits_out_the_cooldown(self):
+        # A CLI that cannot sign in must not earn a process on every poll.
+        runs = []
 
-            start(1_060.0)
-            self.assertEqual(len(spawned), 1)
+        def runner(agy_bin, timeout):
+            runs.append(agy_bin)
+            raise RuntimeError("agy /usage exited 1")
 
-            start(1_400.0)
-            self.assertEqual(len(spawned), 2)
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+            os.environ, {"AGY_AUTO_START": "1"}
+        ), mock.patch("agy_rate.find_agy_cli", return_value="/usr/bin/agy"):
+            stamp = Path(tmp) / "stamp"
+            fetch_quota_with_cli(runner=runner, stamp_path=stamp, now=1_000.0)
+            self.assertEqual(len(runs), 1)
+            fetch_quota_with_cli(runner=runner, stamp_path=stamp, now=1_060.0)
+            self.assertEqual(len(runs), 1, "still inside the cooldown")
+            fetch_quota_with_cli(
+                runner=runner, stamp_path=stamp, now=1_000.0 + CLI_START_COOLDOWN + 1
+            )
+            self.assertEqual(len(runs), 2)
+
+    def test_the_usage_payload_carries_both_groups(self):
+        snapshot = parse_usage_command_payload(FULL_USAGE_PAYLOAD)
+        self.assertEqual(
+            [(w.group_id, w.cadence, w.used_percent) for w in snapshot.windows],
+            [
+                ("gemini", "5h", 10),
+                ("gemini", "7d", 82),
+                ("claude-gpt", "5h", 30),
+                ("claude-gpt", "7d", 10),
+            ],
+        )
+
+    def test_a_payload_without_groups_is_refused(self):
+        with self.assertRaises(RuntimeError):
+            parse_usage_command_payload({"status": "SUCCESS"})
+        with self.assertRaises(RuntimeError):
+            parse_usage_command_payload({"command": {"data": {}}})
 
     def test_cooldown_ignores_a_stamp_from_the_future(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -541,47 +609,6 @@ class StaleCredentialTests(unittest.TestCase):
         message = str(raised.exception)
         self.assertIn("earlier runs", message)
         self.assertNotIn("401", message)
-
-
-class AutoStartTests(unittest.TestCase):
-    def test_a_csrf_refusal_ends_the_wait_rather_than_serving_it_out(self):
-        """A run we start cannot hand us its token, so waiting is spending.
-
-        It spawns nothing to carry the token and will not take one we choose.
-        Thirty seconds of a poll thread buys nothing.
-        """
-
-        slept = []
-        with mock.patch(
-            "agy_rate.fetch_quota_snapshot",
-            side_effect=RuntimeError("AGY quota needs a CSRF token; none is available yet"),
-        ):
-            with tempfile.TemporaryDirectory() as directory:
-                result = fetch_quota_with_cli(
-                    enabled=True,
-                    spawner=lambda _binary: FakeProcess(),
-                    stamp_path=Path(directory) / "stamp",
-                    sleep=slept.append,
-                )
-        self.assertIsNone(result)
-        self.assertEqual(slept, [])
-
-    def test_other_failures_still_get_their_deadline(self):
-        slept = []
-        timeline = iter([0.0] + [0.5] * 6 + [999.0])
-        with mock.patch(
-            "agy_rate.fetch_quota_snapshot",
-            side_effect=RuntimeError("AGY is not running"),
-        ):
-            with mock.patch("agy_rate.time.monotonic", side_effect=lambda: next(timeline)):
-                with tempfile.TemporaryDirectory() as directory:
-                    fetch_quota_with_cli(
-                        enabled=True,
-                        spawner=lambda _binary: FakeProcess(),
-                        stamp_path=Path(directory) / "stamp",
-                        sleep=slept.append,
-                    )
-        self.assertTrue(slept)
 
 
 class RememberedTokenTests(unittest.TestCase):

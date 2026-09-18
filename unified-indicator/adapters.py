@@ -470,10 +470,12 @@ def load_gemini() -> ProviderSnapshot:
         error = str(exc)
         agy_snapshot = read_cache()
         # Antigravity only listens while it runs, so an idle machine has no
-        # endpoint at all. Starting it briefly is the same nudge we use for the
-        # Grok CLI, and it stays opt-in for the same reason. Starting it to
-        # refill a cache that is still fresh would burn a process for numbers
-        # we already have, so the stale cache is what earns the spawn.
+        # endpoint at all. The CLI will still print its own usage screen
+        # without one -- `agy -p /usage` costs a process and no model quota --
+        # and that is the only way left to read Gemini while Antigravity is
+        # closed. Running it to refill a cache that is still fresh would spend
+        # ten seconds on numbers already in hand, so the stale cache is what
+        # earns the run.
         if agy_snapshot is None or _freshness(agy_snapshot.updated_at) != "fresh":
             auto_start = read_manager_config().get("AGY_AUTO_START", "false").lower()
             started = fetch_quota_with_cli(

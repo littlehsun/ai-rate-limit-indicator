@@ -240,11 +240,10 @@ if ! grep -Eq '^[[:space:]]*(export[[:space:]]+)?MOBILE_PUBLISH[[:space:]]*=' "$
     printf 'MOBILE_PUBLISH=false\n' >> "$CONFIG_FILE"
 fi
 if ! grep -Eq '^[[:space:]]*(export[[:space:]]+)?AGY_AUTO_START[[:space:]]*=' "$CONFIG_FILE"; then
-    printf '\n# Dead since Antigravity 1.2.2: the run this starts serves quota\n' >> "$CONFIG_FILE"
-    printf '# for a few seconds but demands a CSRF token it hands to nothing,\n' >> "$CONFIG_FILE"
-    printf '# so the request is always refused. Kept as a switch in case a\n' >> "$CONFIG_FILE"
-    printf '# later Antigravity makes the run it starts readable again.\n' >> "$CONFIG_FILE"
-    printf 'AGY_AUTO_START=false\n' >> "$CONFIG_FILE"
+    printf '\n# true lets the indicator run `agy -p /usage` when Antigravity is\n' >> "$CONFIG_FILE"
+    printf '# closed. It is a slash command: no model quota, no CSRF token, and\n' >> "$CONFIG_FILE"
+    printf '# about ten seconds of one process, at most once per cooldown.\n' >> "$CONFIG_FILE"
+    printf 'AGY_AUTO_START=true\n' >> "$CONFIG_FILE"
 fi
 if [[ "$config_file_created" == true || "$CONFIG_FILE" == "$DEFAULT_CONFIG_FILE" ]]; then
     chmod 600 "$CONFIG_FILE"
