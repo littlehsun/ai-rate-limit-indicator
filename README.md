@@ -311,7 +311,21 @@ AGY exports `ANTIGRAVITY_CSRF_TOKEN` and `ANTIGRAVITY_LS_ADDRESS` to
 everything it spawns. Reading another process's environment is a strong thing
 to do, so the adapter reads only processes belonging to this user, looks only
 for those two variables, and never logs what it finds. `AGY_CSRF_TOKEN`
-supplies one by hand instead. This is Linux-only: /proc is where it lives, and
+supplies one by hand instead.
+
+A token dies with the AGY run that minted it, while the processes it was
+handed to can outlive that run by days -- a shell started from AGY sits there
+holding one nothing will accept again. So every token on the machine is
+collected, newest process first, and the one naming a port AGY is listening
+on right now goes first. When all of them are refused, the message says they
+are from earlier runs rather than reporting an HTTP 401.
+
+`AGY_AUTO_START` can no longer serve quota. It still starts `agy models`, and
+that run still opens a quota port for a few seconds, but the run mints a token
+it hands to nothing and will not accept one chosen for it, so the request is
+refused however long we wait. The auto-start path now recognises that refusal
+and stops instead of holding a poll thread for its full deadline. Gemini needs
+Antigravity actually running, with something it started still alive. This is Linux-only: /proc is where it lives, and
 its absence means no token rather than an error, so macOS keeps whatever the
 cache holds. With no token anywhere, Gemini is reported as needing one rather
 than as a dead endpoint.

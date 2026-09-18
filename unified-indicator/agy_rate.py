@@ -27,6 +27,10 @@ CSRF_HEADER = "x-codeium-csrf-token"
 # the only supply we have, and it is the same one AGY's own tooling uses.
 TOKEN_VARIABLE = "ANTIGRAVITY_CSRF_TOKEN"
 ADDRESS_VARIABLE = "ANTIGRAVITY_LS_ADDRESS"
+
+# Shared by the two messages a CSRF refusal produces, so the auto-start path
+# can recognise its own defeat without matching on wording.
+CSRF_REFUSAL_MARKER = "CSRF token"
 CLI_START_TIMEOUT = 30.0
 CLI_START_POLL_INTERVAL = 0.25
 CLI_START_COOLDOWN = 300.0
@@ -125,7 +129,16 @@ class AgyCredentials:
 
 
 def find_agy_credentials(proc_root: Optional[Path] = None) -> Optional[AgyCredentials]:
-    """Borrow the CSRF token from a process AGY started.
+    """The likeliest live token, or None. See find_all_agy_credentials."""
+
+    found = find_all_agy_credentials(proc_root)
+    return found[0] if found else None
+
+
+def find_all_agy_credentials(
+    proc_root: Optional[Path] = None,
+) -> tuple[AgyCredentials, ...]:
+    """Borrow CSRF tokens from the processes AGY started.
 
     Reading another process's environment is a strong thing to do, so this
     only ever reads processes belonging to this user, only looks for these two
@@ -133,14 +146,24 @@ def find_agy_credentials(proc_root: Optional[Path] = None) -> Optional[AgyCreden
     numbers at all: the token exists for one run of AGY, is never written
     down, and is not accepted from the outside.
 
+    All of them, not the first found, and newest process first. A token dies
+    with the AGY run that minted it, but the processes it was handed to can
+    outlive that run by days -- a shell or an ssh session started from AGY
+    sits there holding a token nothing will accept again. Taking the first
+    match would mean handing a restarted AGY a token from the run before it,
+    which it refuses, while the live token sits in a younger process.
+
     Linux only. /proc is where this lives, and its absence is a "no token"
     rather than an error, so macOS keeps whatever the cache holds.
     """
 
     override = os.environ.get("AGY_CSRF_TOKEN", "").strip()
     if override:
-        return AgyCredentials(
-            token=override, address=os.environ.get("AGY_LS_ADDRESS", "").strip() or None
+        return (
+            AgyCredentials(
+                token=override,
+                address=os.environ.get("AGY_LS_ADDRESS", "").strip() or None,
+            ),
         )
 
     root = proc_root or Path("/proc")
@@ -148,10 +171,13 @@ def find_agy_credentials(proc_root: Optional[Path] = None) -> Optional[AgyCreden
         entries = sorted(
             (entry for entry in root.iterdir() if entry.name.isdigit()),
             key=lambda entry: int(entry.name),
+            reverse=True,
         )
     except OSError:
-        return None
+        return ()
 
+    found: list[AgyCredentials] = []
+    seen: set[str] = set()
     uid = os.getuid()
     for entry in entries:
         try:
@@ -171,11 +197,17 @@ def find_agy_credentials(proc_root: Optional[Path] = None) -> Optional[AgyCreden
             ):
                 values[name.decode("utf-8", "replace")] = value.decode("utf-8", "replace")
         token = values.get(TOKEN_VARIABLE, "").strip()
-        if token:
-            return AgyCredentials(
-                token=token, address=values.get(ADDRESS_VARIABLE, "").strip() or None
+        # One AGY run hands the same token to everything it spawns, so without
+        # this the same token is tried once per process it started.
+        if token and token not in seen:
+            seen.add(token)
+            found.append(
+                AgyCredentials(
+                    token=token,
+                    address=values.get(ADDRESS_VARIABLE, "").strip() or None,
+                )
             )
-    return None
+    return tuple(found)
 
 
 def find_agy_ports() -> tuple[int, ...]:
@@ -298,6 +330,34 @@ def quota_ports(
     return (port,) + tuple(other for other in found if other != port)
 
 
+def credential_attempts(
+    ports: tuple[int, ...],
+    credentials: tuple[AgyCredentials, ...],
+) -> tuple[tuple[int, Optional[AgyCredentials]], ...]:
+    """Which token to offer which port, best guess first.
+
+    A token names the port it was minted for, so a token whose port is one AGY
+    is listening on right now is almost certainly the live one -- that pairing
+    goes first. Everything else is a fallback for the case where the address
+    is missing or stale: every remaining port is still tried with every token,
+    because being wrong here costs one refused request and being right is the
+    difference between numbers and no numbers.
+    """
+
+    if not credentials:
+        return tuple((port, None) for port in ports)
+
+    attempts: list[tuple[int, Optional[AgyCredentials]]] = []
+    for credential in credentials:
+        if credential.port in ports:
+            attempts.append((credential.port, credential))
+    for port in ports:
+        for credential in credentials:
+            if (port, credential) not in attempts:
+                attempts.append((port, credential))
+    return tuple(attempts)
+
+
 def quota_headers(credentials: Optional[AgyCredentials], base: str) -> dict[str, str]:
     headers = {
         "Content-Type": "application/json",
@@ -319,8 +379,8 @@ def fetch_quota_snapshot(
     timeout: float = 3.0,
     credentials: Optional[AgyCredentials] = None,
 ) -> AgyQuotaSnapshot:
-    credentials = credentials or find_agy_credentials()
-    candidates = quota_ports(ports, credentials)
+    held = (credentials,) if credentials else find_all_agy_credentials()
+    attempts = credential_attempts(tuple(ports or find_agy_ports()), held)
     context = ssl.create_default_context()
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE
@@ -328,13 +388,13 @@ def fetch_quota_snapshot(
     best_error: Optional[Exception] = None
     best_rank = 0
 
-    for port in candidates:
+    for port, credential in attempts:
         for scheme in SCHEMES:
             base = f"{scheme}://127.0.0.1:{port}"
             request = urllib.request.Request(
                 f"{base}{QUOTA_PATH}",
                 data=payload,
-                headers=quota_headers(credentials, base),
+                headers=quota_headers(credential, base),
                 method="POST",
             )
             try:
@@ -363,7 +423,11 @@ def fetch_quota_snapshot(
     # Described once: an HTTPError's body is a stream, and reading it twice
     # gets an empty string the second time.
     description = describe_error(best_error)
-    if credentials is None and _is_csrf_refusal(best_error, description):
+    if _is_csrf_refusal(best_error, description) and "INVALID" in description.upper():
+        # Every token we hold was refused, so they belong to AGY runs that
+        # have ended. Saying so beats "HTTP 401", which reads as a fault.
+        raise RuntimeError("AGY refused every CSRF token we hold; they are from earlier runs")
+    if not held and _is_csrf_refusal(best_error, description):
         # Naming the cause is the difference between "AGY is broken" and "open
         # AGY once, so that something it starts is carrying the token".
         raise RuntimeError("AGY quota needs a CSRF token; none is available yet")
@@ -487,7 +551,13 @@ def fetch_quota_with_cli(
         while True:
             try:
                 return fetch_quota_snapshot(timeout=timeout)
-            except RuntimeError:
+            except RuntimeError as exc:
+                # A run started this way mints a token and tells nobody: it
+                # spawns nothing to carry it, and it will not accept one we
+                # choose. Waiting out the deadline cannot change that, so the
+                # poll thread is given its half-minute back.
+                if CSRF_REFUSAL_MARKER in str(exc):
+                    return None
                 if time.monotonic() >= deadline:
                     return None
                 sleep(CLI_START_POLL_INTERVAL)

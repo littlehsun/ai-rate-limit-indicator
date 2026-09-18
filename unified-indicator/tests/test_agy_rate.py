@@ -10,6 +10,8 @@ from unittest import mock
 
 from agy_rate import (
     ADDRESS_VARIABLE,
+    credential_attempts,
+    find_all_agy_credentials,
     CSRF_HEADER,
     TOKEN_VARIABLE,
     AgyCredentials,
@@ -249,7 +251,7 @@ class QuotaFetchErrorTests(unittest.TestCase):
         # A machine running AGY has a real token in a real process, and it
         # reorders the ports under these tests. What is being tested here is
         # the reporting, not the discovery.
-        patcher = mock.patch("agy_rate.find_agy_credentials", return_value=None)
+        patcher = mock.patch("agy_rate.find_all_agy_credentials", return_value=())
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -465,8 +467,114 @@ class CredentialTests(unittest.TestCase):
             io.BytesIO(b'{"code":"unauthenticated","message":"missing CSRF token"}'),
         )
         with mock.patch("agy_rate.urllib.request.urlopen", side_effect=refusal):
-            with mock.patch("agy_rate.find_agy_credentials", return_value=None):
+            with mock.patch("agy_rate.find_all_agy_credentials", return_value=()):
                 with self.assertRaises(RuntimeError) as raised:
                     fetch_quota_snapshot(ports=(44563,))
         self.assertIn("CSRF token", str(raised.exception))
         self.assertIn("none is available", str(raised.exception))
+
+
+class StaleCredentialTests(unittest.TestCase):
+    """A token outlives the AGY run that minted it.
+
+    AGY hands the token to everything it spawns, and a shell or an ssh session
+    started from AGY can sit there for days holding a token nothing will
+    accept again. Reaching for the first one found means offering a restarted
+    AGY a token from the run before it.
+    """
+
+    def setUp(self):
+        for name in ("AGY_CSRF_TOKEN", "AGY_LS_ADDRESS"):
+            self.addCleanup(os.environ.pop, name, None)
+            os.environ.pop(name, None)
+
+    def test_the_newest_process_is_offered_first(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fake_proc(root, 100, {TOKEN_VARIABLE: "yesterday", ADDRESS_VARIABLE: "localhost:44563"})
+            fake_proc(root, 900, {TOKEN_VARIABLE: "today", ADDRESS_VARIABLE: "localhost:33567"})
+            found = find_all_agy_credentials(root)
+        self.assertEqual([c.token for c in found], ["today", "yesterday"])
+
+    def test_one_run_s_many_processes_are_one_token(self):
+        # AGY gives every process it starts the same token; trying it once per
+        # process would be the same refused request several times over.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for pid in (100, 200, 300):
+                fake_proc(root, pid, {TOKEN_VARIABLE: "same", ADDRESS_VARIABLE: "localhost:1"})
+            self.assertEqual(len(find_all_agy_credentials(root)), 1)
+
+    def test_a_token_whose_port_is_live_beats_a_newer_one_that_is_not(self):
+        # The strongest evidence a token is current is that AGY is listening
+        # on the port it names.
+        newer = AgyCredentials(token="newer", address="localhost:99999")
+        matching = AgyCredentials(token="matching", address="localhost:44563")
+        attempts = credential_attempts((44563,), (newer, matching))
+        self.assertEqual(attempts[0], (44563, matching))
+
+    def test_every_token_is_still_tried_on_every_port(self):
+        first = AgyCredentials(token="a", address="localhost:1")
+        second = AgyCredentials(token="b")
+        attempts = credential_attempts((7, 8), (first, second))
+        self.assertEqual(
+            set(attempts), {(7, first), (7, second), (8, first), (8, second)}
+        )
+
+    def test_no_tokens_still_asks_every_port(self):
+        self.assertEqual(credential_attempts((7, 8), ()), ((7, None), (8, None)))
+
+    def test_every_token_refused_says_they_are_old_rather_than_HTTP_401(self):
+        refusal = urllib.error.HTTPError(
+            "http://127.0.0.1:1/x", 401, "Unauthorized", {},
+            io.BytesIO(b'{"code":"unauthenticated","message":"invalid CSRF token"}'),
+        )
+        held = (AgyCredentials(token="stale", address="localhost:44563"),)
+        with mock.patch("agy_rate.urllib.request.urlopen", side_effect=refusal):
+            with mock.patch("agy_rate.find_all_agy_credentials", return_value=held):
+                with self.assertRaises(RuntimeError) as raised:
+                    fetch_quota_snapshot(ports=(44563,))
+        message = str(raised.exception)
+        self.assertIn("earlier runs", message)
+        self.assertNotIn("401", message)
+
+
+class AutoStartTests(unittest.TestCase):
+    def test_a_csrf_refusal_ends_the_wait_rather_than_serving_it_out(self):
+        """A run we start cannot hand us its token, so waiting is spending.
+
+        It spawns nothing to carry the token and will not take one we choose.
+        Thirty seconds of a poll thread buys nothing.
+        """
+
+        slept = []
+        with mock.patch(
+            "agy_rate.fetch_quota_snapshot",
+            side_effect=RuntimeError("AGY quota needs a CSRF token; none is available yet"),
+        ):
+            with tempfile.TemporaryDirectory() as directory:
+                result = fetch_quota_with_cli(
+                    enabled=True,
+                    spawner=lambda _binary: FakeProcess(),
+                    stamp_path=Path(directory) / "stamp",
+                    sleep=slept.append,
+                )
+        self.assertIsNone(result)
+        self.assertEqual(slept, [])
+
+    def test_other_failures_still_get_their_deadline(self):
+        slept = []
+        timeline = iter([0.0] + [0.5] * 6 + [999.0])
+        with mock.patch(
+            "agy_rate.fetch_quota_snapshot",
+            side_effect=RuntimeError("AGY is not running"),
+        ):
+            with mock.patch("agy_rate.time.monotonic", side_effect=lambda: next(timeline)):
+                with tempfile.TemporaryDirectory() as directory:
+                    fetch_quota_with_cli(
+                        enabled=True,
+                        spawner=lambda _binary: FakeProcess(),
+                        stamp_path=Path(directory) / "stamp",
+                        sleep=slept.append,
+                    )
+        self.assertTrue(slept)

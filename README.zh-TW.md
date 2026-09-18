@@ -151,6 +151,17 @@ AGY 會把 `ANTIGRAVITY_CSRF_TOKEN` 與 `ANTIGRAVITY_LS_ADDRESS` 傳給它產生
 錯誤，macOS 會沿用既有 cache。完全找不到 token 時，Gemini 會顯示為缺少 token，
 而不是 endpoint 掛掉。
 
+token 會隨著鑄造它的那次 AGY 執行一起失效，但被交付 token 的行程可能多活好幾天
+—— 從 AGY 開出來的 shell 會一直帶著一把再也不會被接受的 token。因此程式會收集
+機器上所有的 token，較新的行程優先，並把「address 指向 AGY 目前真的在聽的 port」
+那一把排到最前面。全部都被拒絕時，訊息會說這些 token 來自先前的執行，而不是丟出
+HTTP 401。
+
+`AGY_AUTO_START` 已經無法取得 quota。它仍然會啟動 `agy models`，那次執行也仍會
+開幾秒鐘的 quota port，但它鑄的 token 不會交給任何行程，也不接受外部指定，所以
+再怎麼等都會被拒絕。auto-start 現在會辨識這種拒絕並提早放棄，不再佔住 poll
+thread 整個 deadline。Gemini 需要 Antigravity 真的在執行，而且它啟動的行程還活著。
+
 Claude OAuth credential 會直接讀取 Claude Code 現有的
 `~/.claude/.credentials.json`；indicator 不會自行保存或更新 access token。
 若沒有有效的 OAuth credential，Claude usage 會顯示為 unavailable。
