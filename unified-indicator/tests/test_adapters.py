@@ -57,10 +57,17 @@ class AdapterTests(unittest.TestCase):
             )
 
     def test_claude_adapter_returns_no_data_without_oauth(self):
+        # The CLI fallback is held off here on purpose. Left on, this test
+        # spawns the real `claude` for its numbers -- and then passes anyway
+        # for the next five minutes, because the cooldown stamp stops the
+        # second spawn. A test that only fails on a cold cache is worse than
+        # one that fails.
         with patch(
             "claude_oauth.fetch_oauth_snapshot",
             side_effect=ClaudeOAuthUnavailable("no credentials"),
-        ), patch("claude_oauth.read_cache", return_value=None):
+        ), patch("claude_oauth.read_cache", return_value=None), patch(
+            "claude_oauth.fetch_usage_with_cli", return_value=None
+        ):
             snapshot = load_claude()
 
         self.assertEqual(snapshot.provider, "claude")
@@ -76,13 +83,53 @@ class AdapterTests(unittest.TestCase):
         with patch(
             "claude_oauth.fetch_oauth_snapshot",
             side_effect=ClaudeOAuthUnavailable("Claude OAuth access token is expired"),
-        ), patch("claude_oauth.read_cache", return_value=cached):
+        ), patch("claude_oauth.read_cache", return_value=cached), patch(
+            "claude_oauth.fetch_usage_with_cli", return_value=None
+        ):
             snapshot = load_claude()
 
         # The cached numbers stay visible, with the reason they stopped moving.
         self.assertEqual(snapshot.windows[0].used_percent, 42)
         self.assertEqual(snapshot.status, "stale")
         self.assertIn("expired", snapshot.error)
+
+    def test_claude_adapter_asks_the_cli_once_the_cache_is_stale(self):
+        stale = ClaudeOAuthSnapshot(
+            updated_at="2026-07-30T06:00:00+00:00",
+            windows=(ClaudeOAuthWindow("5h", 42, None),),
+        )
+        from_cli = ClaudeOAuthSnapshot(
+            updated_at=datetime.now(timezone.utc).isoformat(),
+            windows=(ClaudeOAuthWindow("5h", 25, None), ClaudeOAuthWindow("7d", 99, None)),
+        )
+        with patch(
+            "claude_oauth.fetch_oauth_snapshot",
+            side_effect=ClaudeOAuthUnavailable("Claude OAuth access token is expired"),
+        ), patch("claude_oauth.read_cache", return_value=stale), patch(
+            "claude_oauth.fetch_usage_with_cli", return_value=from_cli
+        ), patch("claude_oauth.write_cache"):
+            snapshot = load_claude()
+
+        self.assertEqual([w.used_percent for w in snapshot.windows], [25, 99])
+        self.assertEqual(snapshot.status, "fresh")
+        # The API failing is not worth saying once the CLI answered.
+        self.assertIsNone(snapshot.error)
+
+    def test_claude_adapter_leaves_a_fresh_cache_alone(self):
+        fresh = ClaudeOAuthSnapshot(
+            updated_at=datetime.now(timezone.utc).isoformat(),
+            windows=(ClaudeOAuthWindow("5h", 42, None),),
+        )
+        with patch(
+            "claude_oauth.fetch_oauth_snapshot",
+            side_effect=ClaudeOAuthUnavailable("Claude OAuth access token is expired"),
+        ), patch("claude_oauth.read_cache", return_value=fresh), patch(
+            "claude_oauth.fetch_usage_with_cli"
+        ) as from_cli:
+            load_claude()
+
+        # Numbers already in hand are worth more than the seconds a spawn costs.
+        from_cli.assert_not_called()
 
     def test_claude_adapter_caches_each_successful_fetch(self):
         oauth_snapshot = ClaudeOAuthSnapshot(

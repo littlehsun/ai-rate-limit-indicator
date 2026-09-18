@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 USAGE_ENDPOINT = "https://api.anthropic.com/api/oauth/usage"
@@ -232,8 +235,13 @@ def refresh_is_in_cooldown(
     stamp_path: Optional[Path] = None,
     *,
     now: Optional[float] = None,
+    cooldown: float = REFRESH_COOLDOWN,
 ) -> bool:
-    """Report whether the last refresh is recent enough to skip this one."""
+    """Report whether the last attempt is recent enough to skip this one.
+
+    The window is a parameter because two different attempts share this: the
+    token refresh, and asking the CLI for its usage screen.
+    """
 
     path = stamp_path or default_refresh_stamp_path()
     now = time.time() if now is None else now
@@ -243,7 +251,7 @@ def refresh_is_in_cooldown(
         return False
     # A clock that jumped backwards must not lock refreshing out until it
     # catches up, so a negative age counts as no cooldown at all.
-    return 0.0 <= now - last_attempt < REFRESH_COOLDOWN
+    return 0.0 <= now - last_attempt < cooldown
 
 
 def record_refresh_attempt(
@@ -484,6 +492,180 @@ def fetch_oauth_snapshot(
     return ClaudeOAuthSnapshot(
         updated_at=timestamp.astimezone(timezone.utc).isoformat(),
         windows=tuple(windows),
+    )
+
+
+USAGE_COMMAND = "/usage"
+# Measured at a few seconds; the ceiling is for a cold start that has to load
+# the whole CLI before it answers.
+CLI_USAGE_TIMEOUT = 60.0
+CLI_USAGE_COOLDOWN = 300.0
+
+# What the CLI prints. The percentages are the part worth having and the part
+# least likely to be reworded; the reset line is read best-effort, because a
+# window with no reset time still says something true while a wrong one does
+# not.
+SESSION_LINE = re.compile(r"current session:\s*(\d+)%\s*used", re.IGNORECASE)
+WEEK_LINE = re.compile(
+    r"current week\s*\(all models\):\s*(\d+)%\s*used", re.IGNORECASE
+)
+RESET_CLAUSE = re.compile(
+    r"resets\s+(?P<when>[^·\n(]+?)\s*(?:\((?P<zone>[^)]+)\))?\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def default_usage_stamp_path() -> Path:
+    return Path(
+        os.environ.get(
+            "CLAUDE_USAGE_STAMP",
+            Path.home() / ".cache" / "rate-limit-indicator" / "claude-usage-attempt",
+        )
+    )
+
+
+def find_claude_cli() -> Optional[str]:
+    override = os.environ.get("CLAUDE_CLI")
+    if override:
+        return override if os.access(override, os.X_OK) else None
+    return shutil.which("claude")
+
+
+def _parse_reset(clause: str, *, now: datetime) -> Optional[str]:
+    """Turn "Sep 18, 5pm (Asia/Taipei)" into a timestamp, or nothing.
+
+    The CLI writes this line for a person: a month name, no year, an hour that
+    may or may not carry minutes, and a zone in brackets. Every part of that is
+    a way to fail, so failing returns None and the window keeps its percentage
+    without a countdown. A guessed reset time would be worse than none.
+    """
+
+    match = RESET_CLAUSE.search(clause)
+    if not match:
+        return None
+    when = " ".join(match.group("when").split())
+    zone = match.group("zone")
+    try:
+        tz = ZoneInfo(zone) if zone else now.astimezone().tzinfo
+    except (ZoneInfoNotFoundError, ValueError):
+        tz = now.astimezone().tzinfo
+
+    for fmt in ("%b %d, %I:%M%p", "%b %d, %I%p", "%b %d, %H:%M"):
+        try:
+            parsed = datetime.strptime(when, fmt)
+        except ValueError:
+            continue
+        local_now = now.astimezone(tz)
+        for year in (local_now.year, local_now.year + 1):
+            candidate = parsed.replace(year=year, tzinfo=tz)
+            # A reset is ahead of us. December wrapping into January is the
+            # only reason the year is worth guessing at all.
+            if candidate >= local_now - timedelta(hours=1):
+                return candidate.astimezone(timezone.utc).isoformat()
+        return None
+    return None
+
+
+def parse_usage_text(text: str, *, now: Optional[datetime] = None) -> tuple[ClaudeOAuthWindow, ...]:
+    """Read the CLI's usage screen into the windows the API would have given.
+
+    Only the two lines this UI already shows are read. The rest of that screen
+    -- what share of usage came from long sessions, which skills cost most --
+    is a different question than "how much is left".
+    """
+
+    now = now or datetime.now(timezone.utc)
+    windows = []
+    for window_id, pattern in (("5h", SESSION_LINE), ("7d", WEEK_LINE)):
+        for line in text.splitlines():
+            match = pattern.search(line)
+            if not match:
+                continue
+            windows.append(
+                ClaudeOAuthWindow(
+                    id=window_id,
+                    used_percent=min(100, max(0, int(match.group(1)))),
+                    resets_at=_parse_reset(line, now=now),
+                )
+            )
+            break
+    return tuple(windows)
+
+
+def _run_usage_command(claude_bin: str, timeout: float) -> str:
+    result = subprocess.run(
+        (claude_bin, "-p", USAGE_COMMAND, "--output-format", "json"),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        # Without this the CLI can resume an unfinished auto-update on every
+        # spawn. CodexBar measured what that costs when something probes it on
+        # a timer: 90 GiB pulled in three days.
+        env={**os.environ, "DISABLE_AUTOUPDATER": "1"},
+    )
+    if result.returncode != 0:
+        raise ClaudeOAuthUnavailable(
+            f"claude {USAGE_COMMAND} exited {result.returncode}: "
+            f"{result.stderr.strip()[:200]}"
+        )
+    return result.stdout
+
+
+def fetch_usage_with_cli(
+    *,
+    enabled: Optional[bool] = None,
+    timeout: float = CLI_USAGE_TIMEOUT,
+    runner: Optional[Callable[[str, float], str]] = None,
+    stamp_path: Optional[Path] = None,
+    now: Optional[datetime] = None,
+) -> Optional[ClaudeOAuthSnapshot]:
+    """Ask Claude Code for its own usage screen when the API read fails.
+
+    `claude -p /usage --output-format json` is a slash command: it reports
+    total_cost_usd 0 and takes no turn, so it spends nothing but the seconds it
+    runs. What it is for is the morning after an idle night, when the token
+    expired and no Claude Code ran to renew it -- the CLI is the one thing that
+    may still answer, because renewing its own credential is its own business
+    rather than ours.
+
+    It is a fallback and stays one. The API gives exact percentages and ISO
+    reset times; this gives a screen written for a person, and reading prose is
+    a promise to keep re-reading it every time the wording changes.
+    """
+
+    if enabled is None:
+        enabled = _flag_enabled(os.environ.get("CLAUDE_USAGE_CLI"))
+    if not enabled:
+        return None
+    claude_bin = find_claude_cli()
+    if claude_bin is None:
+        return None
+
+    now = now or datetime.now(timezone.utc)
+    stamp = stamp_path or default_usage_stamp_path()
+    # Stamped before the run, so a CLI that hangs costs one attempt per
+    # cooldown rather than one per poll.
+    if refresh_is_in_cooldown(stamp, now=now.timestamp(), cooldown=CLI_USAGE_COOLDOWN):
+        return None
+    record_refresh_attempt(stamp, now=now.timestamp())
+
+    run = runner or _run_usage_command
+    try:
+        payload = json.loads(run(claude_bin, timeout))
+        text = payload.get("result") if isinstance(payload, Mapping) else None
+        windows = parse_usage_text(text or "", now=now)
+    except (
+        OSError,
+        ValueError,
+        ClaudeOAuthUnavailable,
+        subprocess.SubprocessError,
+    ):
+        return None
+    if not windows:
+        return None
+    return ClaudeOAuthSnapshot(
+        updated_at=now.astimezone(timezone.utc).isoformat(), windows=windows
     )
 
 

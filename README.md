@@ -146,10 +146,14 @@ GROK_AUTO_REFRESH=false
 # stale Claude numbers every morning. Linux only.
 CLAUDE_AUTO_REFRESH=false
 
-# true runs `agy models` when Antigravity is not listening. Antigravity only
-# serves quota while it runs, so this starts it for the few seconds a read
-# takes and stops it again.
-AGY_AUTO_START=false
+# true lets the indicator run `claude -p /usage` when the OAuth read fails,
+# which is what an expired token looks like. Free and local: no turn, no
+# tokens, and Claude Code renews its own credential rather than us writing it.
+CLAUDE_USAGE_CLI=true
+
+# true runs `agy -p /usage` when Antigravity is closed. A slash command: no
+# model quota, no CSRF token, about ten seconds of one process.
+AGY_AUTO_START=true
 ```
 
 `DISPLAY_MODE=auto` selects the fresh provider whose 7D usage changed most
@@ -360,6 +364,24 @@ It is off by default because it rewrites Claude Code's own credential file. When
 enabled it writes only after re-reading the file and confirming the refresh token
 it spent is still the one on disk, and a refresh that fails leaves the file
 untouched. Not available on macOS, where the credential lives in the Keychain.
+
+`CLAUDE_USAGE_CLI=true` covers the same morning from the other side, and is on
+by default because it writes nothing. When the API read fails and the cache has
+gone stale, the indicator runs `claude -p /usage --output-format json`. That is
+a slash command: it reports `total_cost_usd: 0`, takes no turn, and answers
+locally. The appeal is not the numbers but who fetches them -- renewing its own
+credential is Claude Code's business rather than ours, so nothing here touches
+the credential file.
+
+It stays a fallback behind the API because it answers in prose written for a
+person: `Current session: 25% used · resets Sep 18, 5pm (Asia/Taipei)`. The
+percentages are read independently of the dates, and a reset time that will not
+parse leaves the window with its percentage and no countdown. A guessed reset
+time would be worse than none. Earlier probing of the CLI was rejected for good
+reasons that still hold -- `claude auth status`, `doctor` and `plugin list`
+refresh nothing, and CodexBar's PTY probe restarted an unfinished auto-update on
+every spawn and pulled 90 GiB in three days -- so this spawn sets
+`DISABLE_AUTOUPDATER=1` and runs at most once per five minutes.
 
 Back up `~/.claude/.credentials.json` before running commands that touch it.
 Claude Code answers a refresh token it believes is dead by blanking both tokens

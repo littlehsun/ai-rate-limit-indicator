@@ -2,11 +2,14 @@ import json
 import os
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
 from claude_oauth import (
+    CLI_USAGE_COOLDOWN,
+    fetch_usage_with_cli,
+    parse_usage_text,
     BETA_HEADER,
     CLIENT_ID,
     TOKEN_ENDPOINT,
@@ -424,3 +427,157 @@ class ClaudeOAuthRefreshTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+USAGE_SCREEN = """You are currently using your subscription to power your Claude Code usage
+
+Current session: 25% used · resets Sep 18, 5pm (Asia/Taipei)
+Current week (all models): 99% used · resets Sep 20, 8:59am (Asia/Taipei)
+
+What's contributing to your limits usage?
+Last 24h · 542 requests · 3 sessions
+  90% of your usage was at >150k context
+"""
+
+NOW = datetime(2026, 9, 18, 8, 30, tzinfo=timezone.utc)
+
+
+class UsageScreenTests(unittest.TestCase):
+    """Reading the screen Claude Code prints for a person.
+
+    It is a fallback for the morning after an idle night, when the token has
+    expired and the API read cannot happen at all. Prose is the price, so the
+    percentages are read independently of the dates: a window with no reset
+    time still says something true, and a guessed one does not.
+    """
+
+    def test_both_windows_are_read(self):
+        windows = parse_usage_text(USAGE_SCREEN, now=NOW)
+        self.assertEqual([(w.id, w.used_percent) for w in windows], [("5h", 25), ("7d", 99)])
+
+    def test_the_reset_times_land_in_the_stated_zone(self):
+        windows = {w.id: w.resets_at for w in parse_usage_text(USAGE_SCREEN, now=NOW)}
+        # 5pm in Taipei is 09:00 UTC.
+        self.assertEqual(windows["5h"], "2026-09-18T09:00:00+00:00")
+        self.assertEqual(windows["7d"], "2026-09-20T00:59:00+00:00")
+
+    def test_a_percentage_without_a_readable_reset_still_counts(self):
+        windows = parse_usage_text("Current session: 40% used · resets whenever", now=NOW)
+        self.assertEqual(windows[0].used_percent, 40)
+        self.assertIsNone(windows[0].resets_at)
+
+    def test_an_unknown_timezone_falls_back_rather_than_failing(self):
+        windows = parse_usage_text(
+            "Current session: 40% used · resets Sep 18, 5pm (Mars/Olympus)", now=NOW
+        )
+        self.assertEqual(windows[0].used_percent, 40)
+
+    def test_a_december_reset_read_in_december_rolls_into_next_year(self):
+        december = datetime(2026, 12, 31, 20, 0, tzinfo=timezone.utc)
+        windows = parse_usage_text(
+            "Current week (all models): 10% used · resets Jan 2, 9am (UTC)", now=december
+        )
+        self.assertEqual(windows[0].resets_at, "2027-01-02T09:00:00+00:00")
+
+    def test_the_opus_line_is_not_mistaken_for_the_all_models_one(self):
+        text = (
+            "Current week (all models): 99% used · resets Sep 20, 8:59am (Asia/Taipei)\n"
+            "Current week (Opus): 12% used · resets Sep 20, 8:59am (Asia/Taipei)\n"
+        )
+        windows = parse_usage_text(text, now=NOW)
+        self.assertEqual([(w.id, w.used_percent) for w in windows], [("7d", 99)])
+
+    def test_a_screen_with_no_limit_lines_is_no_windows(self):
+        self.assertEqual(parse_usage_text("Welcome to Claude Code", now=NOW), ())
+
+    def test_an_absurd_percentage_is_clamped(self):
+        windows = parse_usage_text("Current session: 250% used", now=NOW)
+        self.assertEqual(windows[0].used_percent, 100)
+
+
+class UsageCommandTests(unittest.TestCase):
+    def _runner(self, result, calls=None):
+        def run(claude_bin, timeout):
+            if calls is not None:
+                calls.append(claude_bin)
+            return json.dumps({"result": result, "total_cost_usd": 0})
+
+        return run
+
+    def test_the_fallback_is_a_switch(self):
+        calls = []
+        with mock.patch.dict(os.environ, {"CLAUDE_USAGE_CLI": "false"}, clear=False):
+            self.assertIsNone(
+                fetch_usage_with_cli(runner=self._runner(USAGE_SCREEN, calls))
+            )
+        self.assertEqual(calls, [])
+
+    def test_a_screen_becomes_a_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch(
+            "claude_oauth.find_claude_cli", return_value="/usr/bin/claude"
+        ):
+            snapshot = fetch_usage_with_cli(
+                enabled=True,
+                runner=self._runner(USAGE_SCREEN),
+                stamp_path=Path(tmp) / "stamp",
+                now=NOW,
+            )
+        self.assertEqual([w.id for w in snapshot.windows], ["5h", "7d"])
+        self.assertEqual(snapshot.updated_at, NOW.isoformat())
+
+    def test_a_cli_that_fails_keeps_the_caller_s_cache(self):
+        for failure in (OSError("no binary"), ValueError("not json")):
+            with self.subTest(failure=type(failure).__name__):
+                with tempfile.TemporaryDirectory() as tmp, mock.patch(
+                    "claude_oauth.find_claude_cli", return_value="/usr/bin/claude"
+                ):
+                    self.assertIsNone(
+                        fetch_usage_with_cli(
+                            enabled=True,
+                            runner=mock.Mock(side_effect=failure),
+                            stamp_path=Path(tmp) / "stamp",
+                        )
+                    )
+
+    def test_output_without_the_limit_lines_is_not_a_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch(
+            "claude_oauth.find_claude_cli", return_value="/usr/bin/claude"
+        ):
+            self.assertIsNone(
+                fetch_usage_with_cli(
+                    enabled=True,
+                    runner=self._runner("Welcome to Claude Code"),
+                    stamp_path=Path(tmp) / "stamp",
+                )
+            )
+
+    def test_the_cooldown_keeps_a_hanging_cli_to_one_attempt(self):
+        calls = []
+        with tempfile.TemporaryDirectory() as tmp, mock.patch(
+            "claude_oauth.find_claude_cli", return_value="/usr/bin/claude"
+        ):
+            stamp = Path(tmp) / "stamp"
+            runner = self._runner(USAGE_SCREEN, calls)
+            fetch_usage_with_cli(enabled=True, runner=runner, stamp_path=stamp, now=NOW)
+            fetch_usage_with_cli(
+                enabled=True,
+                runner=runner,
+                stamp_path=stamp,
+                now=NOW + timedelta(seconds=60),
+            )
+            self.assertEqual(len(calls), 1)
+            fetch_usage_with_cli(
+                enabled=True,
+                runner=runner,
+                stamp_path=stamp,
+                now=NOW + timedelta(seconds=CLI_USAGE_COOLDOWN + 1),
+            )
+            self.assertEqual(len(calls), 2)
+
+    def test_the_spawn_turns_the_auto_updater_off(self):
+        # A probe on a timer that lets the CLI resume an unfinished update
+        # pulls gigabytes; CodexBar measured 90 GiB in three days.
+        import inspect
+        from claude_oauth import _run_usage_command
+
+        self.assertIn("DISABLE_AUTOUPDATER", inspect.getsource(_run_usage_command))

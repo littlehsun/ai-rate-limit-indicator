@@ -314,6 +314,7 @@ def load_claude() -> ProviderSnapshot:
     from claude_oauth import (
         ClaudeOAuthUnavailable,
         fetch_oauth_snapshot,
+        fetch_usage_with_cli,
         read_cache,
         write_cache,
     )
@@ -357,6 +358,22 @@ def load_claude() -> ProviderSnapshot:
     except ClaudeOAuthUnavailable as exc:
         error = str(exc)
         oauth_snapshot = read_cache()
+        # The morning after an idle night lands here: the token expired and no
+        # Claude Code ran to renew it. Claude Code itself will still print its
+        # usage screen -- `claude -p /usage` is a slash command, free and
+        # local -- and renewing its own credential is its business rather than
+        # ours, which is the whole appeal. Reading prose is the price, so it
+        # stays a fallback behind the API, and a cache that is still fresh is
+        # worth more than the seconds this costs.
+        if oauth_snapshot is None or _freshness(oauth_snapshot.updated_at) != "fresh":
+            usage_cli = read_manager_config().get("CLAUDE_USAGE_CLI", "true").lower()
+            from_cli = fetch_usage_with_cli(
+                enabled=usage_cli in {"1", "true", "yes", "on"}
+            )
+            if from_cli is not None:
+                write_cache(from_cli)
+                oauth_snapshot = from_cli
+                error = None
 
     if oauth_snapshot is None:
         return _no_data("claude", error)

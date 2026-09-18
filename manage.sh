@@ -228,6 +228,12 @@ install_manager() {
         printf '# so a phone widget can read it. Nothing off the tailnet can reach it.\n' >> "$CONFIG_FILE"
         printf 'MOBILE_PUBLISH=false\n' >> "$CONFIG_FILE"
     fi
+    if ! has_config_assignment CLAUDE_USAGE_CLI; then
+        printf '\n# true lets the indicator run `claude -p /usage` when the OAuth read\n' >> "$CONFIG_FILE"
+        printf '# fails, which is what an expired token looks like. Free and local:\n' >> "$CONFIG_FILE"
+        printf '# no turn, no tokens, and Claude Code renews its own credential.\n' >> "$CONFIG_FILE"
+        printf 'CLAUDE_USAGE_CLI=true\n' >> "$CONFIG_FILE"
+    fi
     if ! has_config_assignment AGY_AUTO_START; then
         printf '\n# true lets the indicator run `agy -p /usage` when Antigravity is\n' >> "$CONFIG_FILE"
         printf '# closed. It is a slash command: no model quota, no CSRF token, and\n' >> "$CONFIG_FILE"

@@ -175,6 +175,20 @@ Claude OAuth credential 會直接讀取 Claude Code 現有的
 `~/.claude/.credentials.json`；indicator 不會自行保存或更新 access token。
 若沒有有效的 OAuth credential，Claude usage 會顯示為 unavailable。
 
+`CLAUDE_USAGE_CLI=true`（預設開啟，因為它不寫入任何東西）是這種情況的後備：當
+API 讀取失敗、快取也已經過期時，indicator 會執行
+`claude -p /usage --output-format json`。這是 slash command，`total_cost_usd: 0`、
+不佔用 turn、本機回應。重點不在數字而在誰去拿 —— 更新自己的憑證是 Claude Code
+自己的事，不是我們的，所以這條路徑完全不碰憑證檔。
+
+它只能當後備，因為回來的是寫給人看的散文：
+`Current session: 25% used · resets Sep 18, 5pm (Asia/Taipei)`。百分比與日期是
+分開解析的，解析不出來的重設時間就讓那個 window 只留百分比、沒有倒數 —— 猜一個
+時間比沒有更糟。過去拒絕探測 CLI 的理由仍然成立（`claude auth status`、`doctor`、
+`plugin list` 都不會更新 token；CodexBar 的 PTY 探測每次都重啟未完成的自動更新，
+三天拉了 90 GiB），所以這個 spawn 會設定 `DISABLE_AUTOUPDATER=1`，而且每五分鐘
+最多一次。
+
 ## 測試
 
 ```bash
