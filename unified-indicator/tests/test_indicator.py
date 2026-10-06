@@ -1,11 +1,62 @@
 import inspect
+import threading
 import unittest
+from unittest.mock import Mock, patch
 
 import indicator
 from models import ProviderSnapshot, UsageWindow
 
 
 class IndicatorTests(unittest.TestCase):
+    def test_slow_collection_does_not_block_or_overlap_ui_updates(self):
+        app = indicator.UnifiedRateIndicator.__new__(indicator.UnifiedRateIndicator)
+        app._update_in_progress = False
+        app.snapshots = ()
+        app._render_snapshots = Mock()
+        started = threading.Event()
+        release = threading.Event()
+        queued = threading.Event()
+        callbacks = []
+
+        def collect():
+            started.set()
+            release.wait(2)
+            return ()
+
+        def idle_add(callback, snapshots):
+            callbacks.append((callback, snapshots))
+            queued.set()
+
+        with patch.object(indicator, "load_snapshots", side_effect=collect) as loader, \
+                patch.object(indicator, "write_snapshot_cache"), \
+                patch.object(indicator.GLib, "idle_add", side_effect=idle_add):
+            try:
+                app.update()
+                self.assertTrue(started.wait(1))
+                app.update()
+                self.assertEqual(loader.call_count, 1)
+                app._render_snapshots.assert_not_called()
+            finally:
+                release.set()
+                self.assertTrue(queued.wait(2))
+        callback, snapshots = callbacks[0]
+        self.assertFalse(callback(snapshots))
+        self.assertFalse(app._update_in_progress)
+        app._render_snapshots.assert_called_once()
+
+    def test_collection_failure_releases_update_guard(self):
+        app = indicator.UnifiedRateIndicator.__new__(indicator.UnifiedRateIndicator)
+        app._update_in_progress = True
+        app.snapshots = ("previous",)
+        with patch.object(indicator, "load_snapshots", side_effect=RuntimeError("offline")), \
+                patch.object(indicator.GLib, "idle_add") as idle, \
+                patch.object(indicator.traceback, "print_exc"):
+            app._collect_snapshots()
+        callback, snapshots = idle.call_args.args
+        self.assertFalse(callback(snapshots))
+        self.assertFalse(app._update_in_progress)
+        self.assertEqual(app.snapshots, ("previous",))
+
     def test_initial_menu_is_built_before_it_is_registered(self):
         source = inspect.getsource(indicator.UnifiedRateIndicator.__init__)
         self.assertLess(

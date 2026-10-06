@@ -6,6 +6,7 @@ import html
 import os
 import signal
 import sys
+import threading
 import time
 import traceback
 from contextlib import suppress
@@ -16,7 +17,8 @@ import gi
 
 gi.require_version("AppIndicator3", "0.1")
 gi.require_version("Gtk", "3.0")
-from gi.repository import AppIndicator3, GLib, Gtk  # noqa: E402
+gi.require_version("PangoCairo", "1.0")
+from gi.repository import AppIndicator3, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 
 from adapters import (  # noqa: E402
     display_settings,
@@ -282,8 +284,14 @@ def make_multi_icon_svg(entries: Sequence[IconEntry]) -> str:
             f'<text x="{cursor + 24}" y="15" font-family="monospace,DejaVu Sans Mono" '
             f'font-size="11" xml:space="preserve">{spans}</text>'
         )
-        cursor += max(92, int(len(plain) * 7.5) + 32)
-    width = max(98, cursor)
+        layout = Pango.Layout.new(PangoCairo.FontMap.get_default().create_context())
+        font = Pango.FontDescription("DejaVu Sans Mono")
+        font.set_absolute_size(11 * Pango.SCALE)
+        layout.set_font_description(font)
+        layout.set_text(plain, -1)
+        text_width, _ = layout.get_pixel_size()
+        cursor += 24 + text_width + 1
+    width = cursor
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="22">'
         f"{''.join(blocks)}</svg>"
@@ -327,6 +335,7 @@ class UnifiedRateIndicator:
         self._icon_generation = int(time.time())
         self.icon_dir = _icon_dir()
         self.snapshots: tuple[ProviderSnapshot, ...] = ()
+        self._update_in_progress = False
         self.auto_selector = AutoDisplaySelector()
         self.settings_window = None
         initial = (
@@ -377,8 +386,38 @@ class UnifiedRateIndicator:
             traceback.print_exc()
 
     def update(self) -> None:
-        self.snapshots = load_snapshots()
-        write_snapshot_cache(self.snapshots)
+        if self._update_in_progress:
+            return
+        self._update_in_progress = True
+        try:
+            threading.Thread(target=self._collect_snapshots, daemon=True).start()
+        except Exception:
+            self._update_in_progress = False
+            raise
+
+    def _collect_snapshots(self) -> None:
+        snapshots = None
+        try:
+            snapshots = load_snapshots()
+            write_snapshot_cache(snapshots)
+        except Exception:
+            print("rate-limit-indicator: collection failed", file=sys.stderr)
+            traceback.print_exc()
+        finally:
+            GLib.idle_add(self._finish_update, snapshots)
+
+    def _finish_update(self, snapshots) -> bool:
+        self._update_in_progress = False
+        if snapshots is not None:
+            self.snapshots = snapshots
+            try:
+                self._render_snapshots()
+            except Exception:
+                print("rate-limit-indicator: render failed", file=sys.stderr)
+                traceback.print_exc()
+        return False
+
+    def _render_snapshots(self) -> None:
         selected = self._select_snapshots()
         if not selected:
             self._set_icon(
