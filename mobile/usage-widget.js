@@ -626,21 +626,23 @@ function buildWidget(state, family) {
     const cells = large ? largeCells(state.payload).slice(0, 10) : mediumCells(state.payload).slice(0, 4);
     const cellWidth = (312 - 12) / 2;
     for (let start = 0; start < cells.length; start += 2) {
-      if (start > 0) widget.addSpacer(large ? 12 : 9);
+      // Matching flexible spacers give each large-widget row an equal
+      // share of the available height, regardless of device or row count.
+      if (large) widget.addSpacer();
+      else if (start > 0) widget.addSpacer(9);
       const band = widget.addStack();
       band.layoutHorizontally();
       for (const [index, cell] of cells.slice(start, start + 2).entries()) {
         if (index > 0) band.addSpacer(12);
         addBlock(band, cell, {
           width: cellWidth,
-          height: large ? 62 : 50,
+          height: large ? 0 : 50,
           stale: cell.provider.status !== "fresh" || (oldData && !offline),
           dim: offline,
         });
       }
+      if (large) widget.addSpacer();
     }
-    // Without this the blocks float in the middle of a large widget.
-    if (large) widget.addSpacer();
   } else {
     const rows = smallRows(state.payload).slice(0, 4);
     // Four rows leave about 25pt of the tile unused at gap 4, so the rows were
