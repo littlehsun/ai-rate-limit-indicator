@@ -233,15 +233,23 @@ function addBar(container, percent, width) {
   const track = container.addStack();
   track.size = new Size(width, 4);
   track.layoutHorizontally();
+  track.spacing = 0;
+  track.setPadding(0, 0, 0, 0);
   track.cornerRadius = 2;
   track.backgroundColor = TRACK;
   // A window nobody reported gets an empty track. Drawing a zero-length fill
   // in the usual green would claim the quota is untouched.
   if (percent === null) return;
+  // A full bar has no child layout or trailing spacer that can shrink its fill.
+  if (percent >= 100) {
+    track.backgroundColor = colorFor(percent);
+    return;
+  }
   const fill = track.addStack();
-  fill.size = new Size(Math.max(2, (width * Math.min(percent, 100)) / 100), 4);
+  fill.size = new Size(Math.max(0, (width * Math.min(Math.max(percent, 0), 100)) / 100), 4);
   fill.cornerRadius = 2;
   fill.backgroundColor = colorFor(percent);
+  fill.setPadding(0, 0, 0, 0);
   // A stack centres its children, which left a 4% bar floating in the middle
   // of its own track. The trailing spacer is what pins the fill to the left.
   track.addSpacer();

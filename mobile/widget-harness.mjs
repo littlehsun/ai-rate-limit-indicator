@@ -10,6 +10,7 @@ const SNAPSHOT = path.join(os.homedir(), ".cache/rate-limit-indicator/snapshots.
 
 class Stack {
   constructor(sink) { this.sink = sink; this.kind = "stack"; }
+  setPadding() {}
   layoutHorizontally() {}
   layoutVertically() {}
   centerAlignContent() {}
@@ -175,3 +176,32 @@ assert(largeCustom.includes("Agy 7D"));
 assert(!largeCustom.includes("Agy-Ext 7D") && !largeCustom.includes("Agy 5H"));
 assert((await render("accessoryCircular", { parameter: "unknown" })).includes("no data"));
 console.log("Display selection, AGY split, cadence and empty selection checks passed.");
+
+// Capture the real bar builder's stack layout independently of text rendering.
+const barSource = source.slice(source.indexOf("function addBar("), source.indexOf("\nfunction addWindowRow"));
+class BarStack {
+  constructor() { this.children = []; }
+  addStack() { const child = new BarStack(); this.children.push(child); return child; }
+  layoutHorizontally() {}
+  setPadding(...padding) { this.padding = padding; }
+  addSpacer() { this.children.push({ spacer: true }); }
+}
+const drawBar = new Function("Size", "TRACK", "colorFor", `${barSource}; return addBar;`)(
+  globalThis.Size, "track", (percent) => percent >= 90 ? "red" : "green",
+);
+for (const width of [132, 150]) {
+  for (const percent of [0, 50, 99, 100, 120, null]) {
+    const root = new BarStack();
+    drawBar(root, percent, width);
+    const track = root.children[0];
+    assert.equal(track.size.w, width);
+    assert.deepEqual(track.padding, [0, 0, 0, 0]);
+    if (percent !== null && percent >= 100) {
+      assert.equal(track.backgroundColor, "red");
+      assert.equal(track.children.length, 0, "full bars must not reserve spacer space");
+    } else if (percent !== null) {
+      assert.equal(track.children[0].size.w, width * percent / 100);
+    }
+  }
+}
+console.log("Bar boundary checks passed at 0%, 50%, 99%, 100%, 120% and missing data.");
