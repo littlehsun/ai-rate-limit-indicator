@@ -264,10 +264,24 @@ there rather than as a silently blank tile.
 Lock Screen sizes are rendered monochrome by iOS, so severity colour is
 unavailable there and fill proportion carries it instead.
 
-Settings live at the top of `usage-widget.js`: `SMALL_ROWS` chooses the small
-widget's rows, `CIRCULAR_PROVIDER` pins the circular gauge to one provider
-instead of following the worst, and `PREVIEW_FAMILY` picks which size the app
-renders when you tap play.
+On iPhone, long-press the widget → Edit Widget → Parameter. Keep the publisher
+URL and append `|` followed by a comma-separated display list:
+
+```text
+http://<your-tailscale-ip>:8477/usage.json|claude,agy-ext,codex,agy
+```
+
+The list controls both order and visibility. Available IDs: `codex`, `claude`,
+`grok`, `agy` (AGY Gemini), and `agy-ext` (AGY Claude/GPT).
+Append `:5h` or `:7d` to show only that window, for example
+`agy-ext:5h,codex,agy:7d`. Without a suffix, supported 5H and 7D
+windows are shown together. Small, medium and rectangular widgets show the
+first four selected items; large shows up to ten windows.
+
+A display list without a URL uses `DEFAULT_ENDPOINT`. A URL alone uses
+`DISPLAY_ITEMS`, which is the first setting in the script. Each widget can
+have its own parameter. `CIRCULAR_PROVIDER` pins a circular gauge and
+`PREVIEW_FAMILY` selects the in-app preview size.
 
 ### What it cannot do
 

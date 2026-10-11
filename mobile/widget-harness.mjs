@@ -1,6 +1,7 @@
 // Runs usage-widget.js against stubbed Scriptable globals and the real
 // snapshot, so the row selection and labels can be checked without an iPhone.
 import fs from "node:fs";
+import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 
@@ -91,6 +92,7 @@ const source = fs.readFileSync(SOURCE, "utf8");
 
 async function render(family, opts = {}) {
   const { fail = false, cached = false, cacheAge = Date.now() } = opts;
+  globalThis.args.widgetParameter = opts.parameter || null;
   globalThis.__FAIL_FETCH = fail;
   globalThis.__DROP = opts.drop || null;
   globalThis.__CACHED = cached;
@@ -99,7 +101,7 @@ async function render(family, opts = {}) {
   captured = null;
   globalThis.__presented = null;
   const module = `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
-  await import(`${module}#${family}-${fail}-${cached}-${cacheAge}-${!!opts.interactive}-${(opts.drop||[]).join()}`);
+  await import(`${module}#${family}-${fail}-${cached}-${cacheAge}-${!!opts.interactive}-${(opts.drop||[]).join()}-${encodeURIComponent(opts.parameter || "")}`);
   return flatten((captured || globalThis.__presented).nodes);
 }
 
@@ -151,6 +153,7 @@ const countRows = (lines) =>
   lines.filter(
     (t) =>
       !/%$/.test(t) &&
+      t !== "--" &&
       !/^\d+[hdm]/.test(t) &&
       !/^\d{1,2}:\d{2}$/.test(t) &&
       !/^(reset |5H |7D )/.test(t) &&
@@ -161,3 +164,14 @@ console.log(`  small 行數: ${small}  ${small <= 4 ? "✓ 放得下" : "✗ 會
 const medium = countRows(rows(await render("medium")));
 const perCol = Math.ceil(medium / 2);
 console.log(`  medium 行數: ${medium}，分兩欄各 ${perCol} 行  ${perCol <= 4 ? "✓ 放得下" : "✗ 會超出高度"}`);
+
+const custom = await render("small", { parameter: "agy-ext:5h,codex,agy:7d" });
+assert(custom.indexOf("Agy-Ext") < custom.indexOf("Codex"));
+assert(custom.indexOf("Codex") < custom.indexOf("Agy"));
+assert(!custom.includes("Claude") && !custom.includes("Grok"));
+const largeCustom = await render("large", { parameter: "http://example.test/usage.json|agy-ext:5h,agy:7d" });
+assert(largeCustom.includes("Agy-Ext 5H"));
+assert(largeCustom.includes("Agy 7D"));
+assert(!largeCustom.includes("Agy-Ext 7D") && !largeCustom.includes("Agy 5H"));
+assert((await render("accessoryCircular", { parameter: "unknown" })).includes("no data"));
+console.log("Display selection, AGY split, cadence and empty selection checks passed.");

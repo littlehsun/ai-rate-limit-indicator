@@ -1,3 +1,10 @@
+// Display settings: edit here on your phone, or override in Edit Widget → Parameter.
+// IDs: codex, claude, grok, agy, agy-ext.
+// Order = display order; omit an ID to hide it. Optional suffix :5h or :7d.
+// Parameter: http://YOUR-HOST:8477/usage.json|claude,agy-ext,codex
+// A list alone also works when DEFAULT_ENDPOINT is configured.
+const DISPLAY_ITEMS = ["codex", "claude", "grok", "agy"];
+
 // Rate Limit Indicator — iOS home screen widget for Scriptable.
 //
 // Reads the snapshot published by `publish.py` on the Tailscale network. The
@@ -11,7 +18,37 @@
 // the URL as the widget parameter instead — this file lives in a public repo,
 // so it must not carry anyone's actual host.
 const DEFAULT_ENDPOINT = "http://127.0.0.1:8477/usage.json";
-const ENDPOINT = (args.widgetParameter || "").trim() || DEFAULT_ENDPOINT;
+const parameter = (args.widgetParameter || "").trim();
+const parts = parameter.split("|");
+const hasEndpoint = /^https?:\/\//i.test(parts[0]);
+const ENDPOINT = hasEndpoint ? parts[0].trim() : DEFAULT_ENDPOINT;
+const displayParameter = hasEndpoint ? parts.slice(1).join("|").trim() : parameter;
+const displayItems = displayParameter
+  ? displayParameter.split(",").map((item) => item.trim().toLowerCase()).filter(Boolean)
+  : DISPLAY_ITEMS;
+
+function displayProviders(payload) {
+  const selected = [];
+  for (const item of displayItems) {
+    const [rawId, cadence] = item.split(":");
+    const id = rawId === "gemini" ? "agy" : rawId;
+    const agy = id === "agy" || id === "agy-ext";
+    const source = payload.providers.find((p) => p.provider === (agy ? "gemini" : id));
+    if (!source || (cadence && !["5h", "7d"].includes(cadence))) continue;
+    const prefix = id === "agy-ext" ? "claude-gpt-" : "";
+    const expected = agy ? ["5h", "7d"] : (PROVIDER_WINDOWS[id] || {}).all;
+    const wanted = cadence ? [cadence] : expected;
+    const windows = wanted
+      ? wanted.map((w) => source.windows.find((v) => v.id === prefix + w) || absentWindow(prefix + w))
+      : source.windows;
+    selected.push({ ...source, provider: id,
+      label: agy ? (prefix ? "Agy-Ext" : "Agy") : source.label,
+      windows: windows.map((w) => ({ ...w, id: agy ? w.id.replace(/^claude-gpt-/, "") : w.id,
+        label: agy ? w.id.split("-").pop().toUpperCase() : w.label })),
+    });
+  }
+  return { ...payload, providers: selected };
+}
 
 // Rows for the small widget, in order. Four rows is what fits, so a provider
 // that needs two windows either spends two of them or sets `combine`.
@@ -30,22 +67,11 @@ const ENDPOINT = (args.widgetParameter || "").trim() || DEFAULT_ENDPOINT;
 // windows still matter, so they ride along as numbers rather than disappearing.
 //
 // Providers absent here show their first backend window and nothing else.
-const PROVIDER_ORDER = ["codex", "claude", "grok", "gemini"];
 
 const PROVIDER_WINDOWS = {
   claude: { bar: "7d", also: ["5h"], all: ["5h", "7d"] },
-  // Antigravity reports a Gemini group and a Claude/GPT one. Carrying both here
-  // put four unlabelled percentages in a cell 150pt wide, which was unreadable
-  // at a glance — the thing these sizes exist for. Only Gemini, then; the large
-  // widget still lists every Claude/GPT window with its name attached.
-  gemini: {
-    bar: "7d",
-    also: ["5h"],
-    // The large widget lists every window, so it needs to know which ones are
-    // meant to exist: a spent quota makes its window disappear from the payload
-    // entirely, and a block that vanishes moves every block after it.
-    all: ["5h", "7d", "claude-gpt-5h", "claude-gpt-7d"],
-  },
+  "agy": { bar: "7d", also: ["5h"], all: ["5h", "7d"] },
+  "agy-ext": { bar: "7d", also: ["5h"], all: ["5h", "7d"] },
 };
 
 // Antigravity drops a window once its quota is spent: the bucket comes back
@@ -63,7 +89,7 @@ function pickWindows(provider) {
   const find = (id) => provider.windows.find((w) => w.id === id);
   if (!wanted) return { bar: provider.windows[0], also: [] };
   const bar = find(wanted.bar) || provider.windows[0];
-  const also = (wanted.also || []).map((id) => find(id) || absentWindow(id));
+  const also = (wanted.also || []).filter((id) => id !== bar?.id && provider.windows.some((w) => w.id === id)).map((id) => find(id) || absentWindow(id));
   return { bar, also: bar ? also : [] };
 }
 
@@ -254,7 +280,7 @@ function addWindowRow(container, provider, window, options) {
     row.addSpacer(4);
   }
 
-  const value = row.addText(`${options.stale ? "~" : ""}${window.used_percent}%`);
+  const value = row.addText(`${options.stale && window.used_percent !== null ? "~" : ""}${percentLabel(window)}`);
   value.font = Font.boldSystemFont(12);
   value.textColor = options.dim ? INK_3 : INK;
 
@@ -276,7 +302,7 @@ const CELL_LABELS = { gemini: "Antigravity" };
 const SHORT_LABELS = { gemini: "AGY" };
 // A circular Lock Screen widget has room for a number and about three
 // characters, so "Antigravity" cannot simply be truncated to "Antigr".
-const CODES = { codex: "CDX", claude: "CLD", grok: "GRK", gemini: "AGY" };
+const CODES = { codex: "CDX", claude: "CLD", grok: "GRK", "agy": "GEM", "agy-ext": "GPT" };
 
 function providerCode(provider) {
   return CODES[provider.provider] || provider.label.slice(0, 3).toUpperCase();
@@ -366,7 +392,7 @@ function largeCells(payload) {
       });
       continue;
     }
-    const expected = (PROVIDER_WINDOWS[provider.provider] || {}).all;
+    const expected = null;
     const listed = expected
       ? expected.map((id) => provider.windows.find((w) => w.id === id) || absentWindow(id))
       : provider.windows;
@@ -385,12 +411,7 @@ function largeCells(payload) {
 }
 
 function orderedProviders(payload) {
-  const found = PROVIDER_ORDER.map((id) =>
-    payload.providers.find((p) => p.provider === id),
-  ).filter(Boolean);
-  // Anything the backend adds later still shows up, just after the known four.
-  const extra = payload.providers.filter((p) => !PROVIDER_ORDER.includes(p.provider));
-  return found.concat(extra);
+  return payload.providers;
 }
 
 function resetDetail(bar, also) {
@@ -483,7 +504,8 @@ function buildAccessory(state, family) {
     return widget;
   }
 
-  const rows = accessoryRows(state.payload);
+  const rows = accessoryRows(state.payload).slice(0, 4);
+  if (!rows.length) { widget.addText("no data"); return widget; }
   // A Lock Screen glance has no room to explain itself, but showing an hours
   // old number as if it were current is worse than one extra character.
   const age = state.fetchedAt ? Date.now() - state.fetchedAt : null;
@@ -601,7 +623,7 @@ function buildWidget(state, family) {
     // Medium is twice as wide as small but exactly as tall, so the extra room
     // buys a second column of blocks, not more rows. Two by two, one provider
     // per block, each with room for a real number and its reset.
-    const cells = large ? largeCells(state.payload) : mediumCells(state.payload);
+    const cells = large ? largeCells(state.payload).slice(0, 10) : mediumCells(state.payload).slice(0, 4);
     const cellWidth = (312 - 12) / 2;
     for (let start = 0; start < cells.length; start += 2) {
       if (start > 0) widget.addSpacer(large ? 12 : 9);
@@ -620,7 +642,7 @@ function buildWidget(state, family) {
     // Without this the blocks float in the middle of a large widget.
     if (large) widget.addSpacer();
   } else {
-    const rows = smallRows(state.payload);
+    const rows = smallRows(state.payload).slice(0, 4);
     // Four rows leave about 25pt of the tile unused at gap 4, so the rows were
     // squeezed together above empty space rather than because they had to be.
     // These spend most of it and keep a margin, since SF Pro's line height is
@@ -651,6 +673,7 @@ function buildWidget(state, family) {
 }
 
 const state = await loadPayload();
+if (state.payload) state.payload = displayProviders(state.payload);
 const family = config.widgetFamily || PREVIEW_FAMILY;
 const widget = family.startsWith("accessory")
   ? buildAccessory(state, family)
