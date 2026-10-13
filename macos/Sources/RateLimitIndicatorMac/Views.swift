@@ -250,9 +250,18 @@ private struct ProviderStatusLabel: View {
     }
 }
 
+private struct ProviderListHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 struct MenuContentView: View {
     @ObservedObject var model: AppModel
     @Environment(\.openSettings) private var openSettings
+    @State private var measuredProviderListHeight: CGFloat = 160
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -304,8 +313,19 @@ struct MenuContentView: View {
                             ProviderSectionView(snapshot: snapshot, model: model)
                         }
                     }
+                    .background {
+                        GeometryReader { geometry in
+                            Color.clear.preference(
+                                key: ProviderListHeightKey.self,
+                                value: geometry.size.height
+                            )
+                        }
+                    }
                 }
                 .frame(height: providerListHeight)
+                .onPreferenceChange(ProviderListHeightKey.self) { height in
+                    measuredProviderListHeight = height
+                }
             }
 
             Divider()
@@ -333,6 +353,7 @@ struct MenuContentView: View {
             .padding(14)
         }
         .frame(width: 440)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func showSettings() {
@@ -341,7 +362,7 @@ struct MenuContentView: View {
     }
 
     private var providerListHeight: CGFloat {
-        min(max(CGFloat(model.dropdownSnapshots.count) * 120, 160), 520)
+        min(max(measuredProviderListHeight, 1), 520)
     }
 }
 
