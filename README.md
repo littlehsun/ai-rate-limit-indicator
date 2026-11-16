@@ -131,7 +131,7 @@ DISPLAY_PROVIDERS=codex,grok,gemini
 # Provider sections shown in the dropdown.
 DROPDOWN_PROVIDERS=codex,claude,grok,gemini
 
-# Shared order for both the panel and dropdown.
+# Shared order for the panel, the floating widget, and the dropdown.
 PROVIDER_ORDER=codex,grok,claude,gemini
 
 # true runs `grok models` once the Grok token has expired, so the CLI
@@ -163,6 +163,10 @@ current selection remains stable when nothing changes.
 `DISPLAY_MODE=custom` displays every provider in `DISPLAY_PROVIDERS`.
 `PROVIDER_ORDER` preserves the complete order, including providers currently
 hidden from either surface.
+
+The floating desktop widget follows the same choice. Custom shows the
+Indicator providers in `PROVIDER_ORDER`. Auto shows the provider the panel
+icon is currently showing.
 
 The same options are available from `Display settings…` in both platform UIs.
 

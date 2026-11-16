@@ -104,7 +104,7 @@ DISPLAY_PROVIDERS=codex,grok,gemini
 # 顯示在下拉選單的 provider
 DROPDOWN_PROVIDERS=codex,claude,grok,gemini
 
-# Panel 與下拉選單共用的順序
+# Panel、懸浮視窗與下拉選單共用的順序
 PROVIDER_ORDER=codex,grok,claude,gemini
 ```
 
@@ -112,8 +112,9 @@ PROVIDER_ORDER=codex,grok,claude,gemini
 沒有新變化時會維持目前選擇。
 
 `DISPLAY_MODE=custom` 會同時顯示 `DISPLAY_PROVIDERS` 中勾選的 provider，
-並依 `PROVIDER_ORDER` 排序。這些設定也可以從下拉選單的
-`Display settings…` 修改。
+並依 `PROVIDER_ORDER` 排序。懸浮視窗跟著同一份選擇：Custom 顯示
+Indicator 欄勾選的 provider，Auto 顯示 panel 圖示目前那一個。
+這些設定也可以從下拉選單的 `Display settings…` 修改。
 
 套用設定：
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A floating desktop widget for the four providers, always in view.
+"""A floating desktop widget for the providers the tray indicator is showing.
 
 It reads the same published snapshot the terminal monitor and the iOS widget
 read, so running it spends no provider quota and needs no credential: the
@@ -7,10 +7,15 @@ desktop indicator already paid for these numbers and `publish.py` hands them
 out. What this adds is a place to put them -- a small frameless window that
 stays above the other windows, on every workspace, wherever it was dragged.
 
-The window is deliberately not a panel icon. The tray has room for one
-provider's two numbers; a desk has room for all four with their reset
-countdowns attached, which is what you actually want on screen while a long
-agent run is burning through a weekly quota.
+Which providers appear, and in what order, is the indicator's display
+settings: the Indicator column and the shared order in Display settings….
+Auto mode shows the one provider the panel icon is currently showing. Custom
+mode shows every provider checked there. `--providers` is the one-launch
+override.
+
+The window is deliberately not a panel icon. The tray has room for one or
+two numbers per provider; a desk has room for every window and its reset
+countdown, for whichever providers that selection names.
 
 Everything above the GTK layer is plain data, so the rows, the palette, the
 countdowns and the stored geometry can be tested without a display.
@@ -21,6 +26,7 @@ from __future__ import annotations
 import argparse
 import configparser
 import errno
+import importlib
 import json
 import os
 import re
@@ -39,6 +45,7 @@ from usage_monitor import (  # noqa: E402
     DANGER_PERCENT,
     DEFAULT_ENDPOINT,
     LANGUAGES,
+    PROVIDER_ORDER,
     STALE_AFTER_SECONDS,
     STRINGS,
     WARNING_PERCENT,
@@ -79,6 +86,11 @@ PROGRAM_NAME = "rate-limit-float"
 # says "3 hours from now" an hour later is wrong, and redrawing four rows is
 # the cheapest possible way to keep it honest.
 TICK_SECONDS = 60
+
+# How often to re-read the indicator's display settings. Apply in that window
+# should reach this widget without a restart, and auto mode changes provider
+# when the panel does.
+DISPLAY_POLL_SECONDS = 2
 
 
 FLOAT_STRINGS: Dict[str, Dict[str, str]] = {
@@ -596,6 +608,108 @@ def build_rows(
     )
 
 
+def providers_following_indicator(
+    mode: str,
+    selected: Sequence[str],
+    order: Sequence[str],
+    *,
+    auto_providers: Optional[Sequence[str]] = None,
+) -> Tuple[str, ...]:
+    """The providers the tray is showing, in the tray's order.
+
+    Custom mode is the Indicator column, ordered by the shared provider order.
+    Auto mode is the provider the tray last chose. Until that choice is
+    published, `auto_providers` is the fallback: every enabled provider, in
+    the same order.
+    """
+
+    known = set(PROVIDER_ORDER)
+    if mode == "auto":
+        source = order if auto_providers is None else auto_providers
+        chosen: list[str] = []
+        for provider in source:
+            if provider in known and provider not in chosen:
+                chosen.append(provider)
+        return tuple(chosen)
+    selected_ids = {provider for provider in selected if provider in known}
+    return tuple(provider for provider in order if provider in selected_ids)
+
+
+def _load_adapters() -> Optional[Any]:
+    """The tray's config reader, from either install layout.
+
+    An install puts this file beside `adapters.py`. The repository keeps them
+    in sibling directories. A machine with neither still has a widget: it
+    falls back to the dashboard's own provider list.
+    """
+
+    here = Path(__file__).resolve().parent
+    for candidate in (here, here.parent / "unified-indicator"):
+        if (candidate / "adapters.py").is_file() and (candidate / "models.py").is_file():
+            if str(candidate) not in sys.path:
+                sys.path.append(str(candidate))
+            try:
+                return importlib.import_module("adapters")
+            except ImportError:
+                return None
+    return None
+
+
+def _enabled_in_order(config: Mapping[str, str], order: Sequence[str]) -> Tuple[str, ...]:
+    enabled = {
+        provider
+        for provider in order
+        if str(config.get(provider.upper(), "false")).lower() in {"1", "true", "yes", "on"}
+    }
+    return tuple(provider for provider in order if provider in enabled)
+
+
+def indicator_providers(
+    config_path: Optional[Path] = None,
+    display_state_path: Optional[Path] = None,
+) -> Optional[Tuple[str, ...]]:
+    """Providers to show so this widget matches the tray.
+
+    None means there is no indicator configuration to follow, and the caller
+    keeps the dashboard's own provider list. An empty tuple is a real answer:
+    the indicator is configured to show nothing.
+    """
+
+    module = _load_adapters()
+    if module is None:
+        return None
+    if config_path is None:
+        config_path = Path(
+            os.environ.get(
+                "RATE_LIMIT_INDICATOR_CONFIG",
+                module.default_manager_config(),
+            )
+        )
+    if not config_path.is_file():
+        return None
+    try:
+        config = module.read_manager_config(config_path)
+        mode, selected = module.display_settings(config)
+        order = module.provider_display_order(config)
+        state_path = (
+            display_state_path
+            if display_state_path is not None
+            else module.default_display_state_path()
+        )
+        auto_providers = None
+        if mode == "auto":
+            published = module.read_display_state(state_path)
+            if published is not None and published[0] == "auto":
+                auto_providers = published[1]
+            else:
+                auto_providers = _enabled_in_order(config, order)
+        return providers_following_indicator(
+            mode, selected, order, auto_providers=auto_providers
+        )
+    except (OSError, ValueError):
+        return None
+
+
 def header_text(snapshot: Snapshot, *, text: Mapping[str, str]) -> str:
     taken_at = snapshot_time(snapshot)
     if taken_at is None:
@@ -781,6 +895,7 @@ class FloatingWidget:
         *,
         state_path: Optional[Path] = None,
         pid_path: Optional[Path] = None,
+        follow_indicator: bool = True,
     ):
         import gi
 
@@ -807,8 +922,10 @@ class FloatingWidget:
         self.text = strings_for(settings.language)
         self.state_path = state_path
         self.pid_path = pid_path
+        self.follow_indicator = follow_indicator
         self.snapshot: Optional[Snapshot] = None
         self.message: Optional[str] = None
+        self._shown_providers: Optional[Tuple[str, ...]] = None
 
         self._client = SnapshotClient(
             settings.endpoint, timeout=settings.timeout, cache_path=settings.cache_file
@@ -932,14 +1049,16 @@ class FloatingWidget:
             self.root.pack_start(
                 self._label(self.message, "float-danger"), False, False, 0
             )
-        if not self.settings.providers:
+        providers = self._visible_providers()
+        self._shown_providers = providers
+        if not providers:
             self.root.pack_start(
                 self._label(self.text["disabled"], "float-warning"), False, False, 0
             )
 
         rows = build_rows(
             self.snapshot,
-            self.settings.providers,
+            providers,
             now=now,
             text=self.text,
             compact=self.float.compact,
@@ -948,6 +1067,23 @@ class FloatingWidget:
             self.root.pack_start(self._provider_box(row), False, False, 0)
 
         self.root.show_all()
+
+    def _visible_providers(self) -> Tuple[str, ...]:
+        """The indicator's selection, unless this launch named its own."""
+
+        if self.follow_indicator:
+            followed = indicator_providers()
+            if followed is not None:
+                return followed
+        return tuple(self.settings.providers)
+
+    def _watch_display(self) -> bool:
+        if self.snapshot is None:
+            return True
+        if self._visible_providers() != self._shown_providers:
+            self.render()
+            self._shrink_to_fit()
+        return True
 
     def _minimize_button(self):
         """One click to get the widget out of the way.
@@ -1319,6 +1455,8 @@ class FloatingWidget:
             self.window.move(*target)
         self.window.show_all()
         self._glib.timeout_add_seconds(TICK_SECONDS, self._tick)
+        if self.follow_indicator:
+            self._glib.timeout_add_seconds(DISPLAY_POLL_SECONDS, self._watch_display)
         threading.Thread(target=self._poll_loop, daemon=True).start()
         self._gtk.main()
         return 0
@@ -1336,7 +1474,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", type=Path, default=None)
     parser.add_argument("--endpoint", default=None, help="publish.py URL to read")
     parser.add_argument(
-        "--providers", default=None, help="comma separated subset to show"
+        "--providers",
+        default=None,
+        help=(
+            "comma separated subset to show for this launch; "
+            "overrides the indicator display settings"
+        ),
     )
     parser.add_argument("--theme", default=None)
     parser.add_argument("--themes", type=Path, default=None, help="themes.ini to read")
@@ -1493,7 +1636,12 @@ def run(argv: Optional[Sequence[str]] = None) -> int:
         return 2
 
     try:
-        widget = FloatingWidget(settings, float_settings, themes)
+        widget = FloatingWidget(
+            settings,
+            float_settings,
+            themes,
+            follow_indicator=args.providers is None,
+        )
     except (ImportError, ValueError) as exc:
         print(
             "error: the floating widget needs GTK 3 and its Python bindings "

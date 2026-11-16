@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 from models import ProviderSnapshot, UsageWindow, parse_timestamp
 
@@ -190,6 +191,73 @@ def write_display_settings(
         except FileNotFoundError:
             pass
     return config_path
+
+
+def default_display_state_path() -> Path:
+    """Where the tray records the providers it is actually showing.
+
+    The floating widget is another process, so it cannot see the tray's auto
+    selection unless the tray writes it down. Custom mode does not need this
+    file: the widget reads DISPLAY_PROVIDERS itself. Auto mode does, because
+    the choice changes as usage changes and only the tray knows which provider
+    won.
+    """
+
+    override = os.environ.get("RATE_LIMIT_INDICATOR_DISPLAY_STATE")
+    if override:
+        return Path(override).expanduser()
+    base = os.environ.get("XDG_CACHE_HOME")
+    cache_home = Path(base) if base else Path.home() / ".cache"
+    return cache_home / "rate-limit-indicator" / "display.json"
+
+
+def write_display_state(
+    mode: str,
+    providers: Sequence[str],
+    path: Optional[Path] = None,
+) -> Path:
+    destination = path or default_display_state_path()
+    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    destination.parent.chmod(0o700)
+    payload = {
+        "mode": "auto" if mode == "auto" else "custom",
+        "providers": [provider for provider in providers if provider in PROVIDER_ORDER],
+    }
+    tmp_path = destination.with_name(f".{destination.name}.tmp")
+    try:
+        tmp_path.write_text(
+            json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+        tmp_path.chmod(0o600)
+        os.replace(tmp_path, destination)
+        destination.chmod(0o600)
+    finally:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+    return destination
+
+
+def read_display_state(
+    path: Optional[Path] = None,
+) -> Optional[tuple[str, tuple[str, ...]]]:
+    source = path or default_display_state_path()
+    try:
+        payload = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    mode = str(payload.get("mode", "")).lower()
+    providers = payload.get("providers")
+    if mode not in {"auto", "custom"} or not isinstance(providers, list):
+        return None
+    return mode, tuple(
+        provider
+        for provider in providers
+        if isinstance(provider, str) and provider in PROVIDER_ORDER
+    )
 
 
 def enabled_providers(path: Optional[Path] = None) -> tuple[str, ...]:

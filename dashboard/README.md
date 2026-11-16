@@ -157,11 +157,15 @@ is for. The tray dropdown still lists them. Compact mode keeps each provider's l
 window only — always the weekly one, so four bars of the same width are
 measuring the same thing.
 
-Settings live in `[float]` in `config.ini`; `endpoint`, `theme`, `language`,
-`interval` and the provider switches are the shared ones above. What you change
-from the menu — position, compact, opacity, scale, on top — is remembered in
-`~/.local/state/rate-limit-indicator/float.json` rather than written back into
-`config.ini`, so the file you hand-edit stays yours.
+Settings live in `[float]` in `config.ini`; `endpoint`, `theme`, `language`
+and `interval` are shared with the terminal monitor. Which providers appear,
+and in what order, follows the tray indicator: the Indicator column and the
+shared order in Display settings… (`DISPLAY_MODE`, `DISPLAY_PROVIDERS` and
+`PROVIDER_ORDER` in `providers.env`). Auto mode shows the provider the panel
+icon is currently showing. `--providers` overrides that for one launch. What
+you change from the menu — position, compact, opacity, scale, on top — is
+remembered in `~/.local/state/rate-limit-indicator/float.json` rather than
+written back into `config.ini`, so the file you hand-edit stays yours.
 
 To have it come back at login:
 
@@ -232,7 +236,10 @@ gemini = false
 ```
 
 Order on screen is always codex, claude, grok, gemini regardless of the order
-here. `--providers` and `?providers=` narrow it further at runtime.
+here. `--providers` and `?providers=` narrow the terminal and the web page
+further at runtime. The floating widget follows the tray indicator's display
+settings instead, and only uses this section when that configuration is
+absent. `--providers` still overrides the widget for one launch.
 
 ## Two deliberate departures from `codex-usage-monitor`
 

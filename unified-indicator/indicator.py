@@ -27,6 +27,7 @@ from adapters import (  # noqa: E402
     provider_display_order,
     read_manager_config,
     write_display_settings,
+    write_display_state,
 )
 from float_widget import (  # noqa: E402
     float_is_running,
@@ -419,6 +420,7 @@ class UnifiedRateIndicator:
 
     def _render_snapshots(self) -> None:
         selected = self._select_snapshots()
+        self._publish_display(selected)
         if not selected:
             self._set_icon(
                 (("codex", "--", "green"),),
@@ -441,6 +443,20 @@ class UnifiedRateIndicator:
                 ),
             )
         self._rebuild_menu(selected)
+
+    def _publish_display(self, selected: tuple[ProviderSnapshot, ...]) -> None:
+        """Tell the floating widget which providers the panel is showing.
+
+        The widget follows this selection. Custom mode can also be read from
+        the config, but auto mode is a choice this process makes on each
+        refresh, and a failure to write it must not take the icon down with it.
+        """
+
+        try:
+            mode, _providers = display_settings(read_manager_config())
+            write_display_state(mode, tuple(item.provider for item in selected))
+        except OSError:
+            return
 
     def _select_snapshots(self) -> tuple[ProviderSnapshot, ...]:
         config = read_manager_config()
@@ -622,8 +638,9 @@ class UnifiedRateIndicator:
         window.add(root)
         intro = Gtk.Label(
             label=(
-                "Choose where each provider appears. Order controls both the "
-                "indicator and dropdown."
+                "Auto shows the provider whose 7D usage just changed, on the "
+                "panel and the floating widget. Custom shows every provider "
+                "checked under Indicator, in the order shared with the dropdown."
             ),
             xalign=0,
         )
@@ -658,9 +675,15 @@ class UnifiedRateIndicator:
             for child in list(provider_grid.get_children()):
                 provider_grid.remove(child)
             provider_grid.attach(Gtk.Label(label="Provider", xalign=0), 0, 0, 1, 1)
-            provider_grid.attach(Gtk.Label(label="Indicator"), 1, 0, 1, 1)
+            indicator_header = Gtk.Label(label="Indicator")
+            indicator_header.set_tooltip_text("Panel icon and floating widget")
+            provider_grid.attach(indicator_header, 1, 0, 1, 1)
             provider_grid.attach(Gtk.Label(label="Dropdown"), 2, 0, 1, 1)
-            provider_grid.attach(Gtk.Label(label="Order"), 3, 0, 1, 1)
+            order_header = Gtk.Label(label="Order")
+            order_header.set_tooltip_text(
+                "Shared by the panel, the floating widget, and the dropdown"
+            )
+            provider_grid.attach(order_header, 3, 0, 1, 1)
             separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
             provider_grid.attach(separator, 0, 1, 4, 1)
             for index, provider in enumerate(order):
@@ -673,7 +696,9 @@ class UnifiedRateIndicator:
                     1,
                 )
                 panel_check = Gtk.CheckButton()
-                panel_check.set_tooltip_text("Show in panel indicator")
+                panel_check.set_tooltip_text(
+                    "Show in the panel indicator and the floating widget"
+                )
                 panel_check.set_halign(Gtk.Align.CENTER)
                 panel_check.set_active(provider in selected)
                 panel_check.connect(

@@ -10,6 +10,7 @@ from adapters import (
     display_settings,
     dropdown_providers,
     enabled_providers,
+    read_display_state,
     load_claude,
     load_codex,
     load_gemini,
@@ -17,6 +18,7 @@ from adapters import (
     provider_display_order,
     read_manager_config,
     write_display_settings,
+    write_display_state,
 )
 from agy_rate import AgyQuotaSnapshot, AgyQuotaWindow
 from claude_oauth import (
@@ -204,6 +206,17 @@ class AdapterTests(unittest.TestCase):
             self.assertNotIn("export PROVIDER_ORDER=", saved)
             self.assertEqual(saved.count("DISPLAY_MODE="), 1)
             self.assertEqual(config.stat().st_mode & 0o777, 0o600)
+
+    def test_display_state_roundtrip_keeps_only_known_providers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "display.json"
+            write_display_state("auto", ("grok", "nope", "codex"), path)
+
+            self.assertEqual(read_display_state(path), ("auto", ("grok", "codex")))
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertIsNone(read_display_state(path.with_name("missing.json")))
+            path.write_text("{", encoding="utf-8")
+            self.assertIsNone(read_display_state(path))
 
     def test_codex_adapter_keeps_reset_credit_expiration(self):
         with tempfile.TemporaryDirectory() as tmp:

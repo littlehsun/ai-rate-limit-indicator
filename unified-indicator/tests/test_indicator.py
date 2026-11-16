@@ -1,9 +1,13 @@
 import inspect
+import os
+import tempfile
 import threading
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import indicator
+from adapters import read_display_state
 from models import ProviderSnapshot, UsageWindow
 
 
@@ -74,6 +78,35 @@ class IndicatorTests(unittest.TestCase):
 
         self.assertNotIn("Auto (recent 7D:", dropdown_source)
         self.assertIn("Auto: recent 7D change", settings_source)
+        self.assertIn("floating widget", settings_source)
+
+    def test_published_display_is_the_selection_the_float_reads(self):
+        app = indicator.UnifiedRateIndicator.__new__(indicator.UnifiedRateIndicator)
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp) / "providers.env"
+            state = Path(tmp) / "display.json"
+            config.write_text(
+                "DISPLAY_MODE=auto\nDISPLAY_PROVIDERS=codex,grok\n",
+                encoding="utf-8",
+            )
+            with patch.dict(
+                os.environ,
+                {
+                    "RATE_LIMIT_INDICATOR_CONFIG": str(config),
+                    "RATE_LIMIT_INDICATOR_DISPLAY_STATE": str(state),
+                },
+            ):
+                app._publish_display(
+                    (
+                        ProviderSnapshot("claude", "Claude", None, ()),
+                        ProviderSnapshot("grok", "Grok", None, ()),
+                    )
+                )
+
+            self.assertEqual(
+                read_display_state(state),
+                ("auto", ("claude", "grok")),
+            )
 
     def test_unified_icon_uses_selected_brand_and_split_colors(self):
         svg = indicator.make_icon_svg(

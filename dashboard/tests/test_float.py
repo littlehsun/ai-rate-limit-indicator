@@ -7,6 +7,8 @@ from pathlib import Path
 
 from usage_float import (
     DEFAULT_OPACITY,
+    indicator_providers,
+    providers_following_indicator,
     ERROR_CHARS,
     MIN_SCALE,
     STATUS_BADGE,
@@ -34,6 +36,7 @@ from usage_float import (
     remove_autostart,
     resolve_float_settings,
     resolve_source,
+    run,
     running_pid,
     stop_float,
     short_error,
@@ -503,6 +506,131 @@ class SourceTests(unittest.TestCase):
             self.assertEqual(
                 resolve_source(remote, snapshot_path=snapshot_file), remote
             )
+
+
+class IndicatorDisplayTests(unittest.TestCase):
+    def test_custom_mode_keeps_the_indicator_order_and_drops_the_rest(self):
+        shown = providers_following_indicator(
+            "custom",
+            ("codex", "gemini"),
+            ("grok", "gemini", "claude", "codex"),
+        )
+        self.assertEqual(shown, ("gemini", "codex"))
+
+    def test_auto_mode_uses_the_published_choice(self):
+        shown = providers_following_indicator(
+            "auto",
+            ("codex", "grok", "gemini"),
+            ("codex", "claude", "grok", "gemini"),
+            auto_providers=("claude",),
+        )
+        self.assertEqual(shown, ("claude",))
+
+    def test_auto_mode_without_a_published_choice_uses_the_fallback_order(self):
+        shown = providers_following_indicator(
+            "auto",
+            ("codex",),
+            ("grok", "codex"),
+        )
+        self.assertEqual(shown, ("grok", "codex"))
+
+    def test_unknown_names_are_dropped(self):
+        self.assertEqual(
+            providers_following_indicator("custom", ("codex", "nope"), ("nope", "codex")),
+            ("codex",),
+        )
+
+    def test_a_missing_indicator_config_leaves_the_dashboard_list_alone(self):
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "providers.env"
+            self.assertIsNone(
+                indicator_providers(missing, Path(directory) / "display.json")
+            )
+
+    def test_custom_settings_are_read_in_the_shared_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "providers.env"
+            state = Path(directory) / "display.json"
+            config.write_text(
+                "\n".join(
+                    (
+                        "CODEX=true",
+                        "CLAUDE=true",
+                        "GROK=true",
+                        "GEMINI=true",
+                        "DISPLAY_MODE=custom",
+                        "DISPLAY_PROVIDERS=codex,grok,gemini",
+                        "PROVIDER_ORDER=grok,claude,codex,gemini",
+                    )
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                indicator_providers(config, state),
+                ("grok", "codex", "gemini"),
+            )
+
+    def test_auto_settings_follow_the_published_provider(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "providers.env"
+            state = Path(directory) / "display.json"
+            config.write_text(
+                "\n".join(
+                    (
+                        "CODEX=true",
+                        "CLAUDE=true",
+                        "GROK=true",
+                        "GEMINI=true",
+                        "DISPLAY_MODE=auto",
+                        "DISPLAY_PROVIDERS=codex,claude,grok,gemini",
+                        "PROVIDER_ORDER=codex,claude,grok,gemini",
+                    )
+                ),
+                encoding="utf-8",
+            )
+            state.write_text(
+                json.dumps({"mode": "auto", "providers": ["grok"]}),
+                encoding="utf-8",
+            )
+            self.assertEqual(indicator_providers(config, state), ("grok",))
+
+    def test_auto_without_a_publication_shows_the_enabled_providers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "providers.env"
+            state = Path(directory) / "missing.json"
+            config.write_text(
+                "\n".join(
+                    (
+                        "CODEX=true",
+                        "CLAUDE=false",
+                        "GROK=true",
+                        "GEMINI=false",
+                        "DISPLAY_MODE=auto",
+                        "PROVIDER_ORDER=grok,codex,claude,gemini",
+                    )
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(indicator_providers(config, state), ("grok", "codex"))
+
+    def test_a_stale_custom_publication_does_not_override_auto(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "providers.env"
+            state = Path(directory) / "display.json"
+            config.write_text(
+                "CODEX=true\nCLAUDE=true\nGROK=false\nGEMINI=false\n"
+                "DISPLAY_MODE=auto\nPROVIDER_ORDER=claude,codex,grok,gemini\n",
+                encoding="utf-8",
+            )
+            state.write_text(
+                json.dumps({"mode": "custom", "providers": ["gemini"]}),
+                encoding="utf-8",
+            )
+            self.assertEqual(indicator_providers(config, state), ("claude", "codex"))
+
+    def test_an_explicit_provider_argument_does_not_follow_the_indicator(self):
+        source = inspect.getsource(run)
+        self.assertIn("follow_indicator=args.providers is None", source)
 
 
 class PidfileTests(unittest.TestCase):
