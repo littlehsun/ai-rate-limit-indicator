@@ -151,6 +151,17 @@ CLAUDE_AUTO_REFRESH=false
 # tokens, and Claude Code renews its own credential rather than us writing it.
 CLAUDE_USAGE_CLI=true
 
+# A second Claude Code account, shown as its own provider (claude_alt). Log
+# it in to its own directory first:
+#   CLAUDE_CONFIG_DIR=~/.claude-alt claude auth login
+# There is no default directory, so the first account never shows up twice.
+# CLAUDE_ALT_AUTO_REFRESH and CLAUDE_ALT_USAGE_CLI follow the CLAUDE_ switches
+# above unless set. Add claude_alt to DISPLAY_PROVIDERS, DROPDOWN_PROVIDERS
+# and PROVIDER_ORDER, or tick it in Display settings…, to show it.
+CLAUDE_ALT=false
+CLAUDE_ALT_CONFIG_DIR=~/.claude-alt
+CLAUDE_ALT_LABEL="Claude (alt)"
+
 # true runs `agy -p /usage` when Antigravity is closed. A slash command: no
 # model quota, no CSRF token, about ten seconds of one process.
 AGY_AUTO_START=true

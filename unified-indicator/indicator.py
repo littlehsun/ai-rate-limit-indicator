@@ -60,6 +60,7 @@ COLORS = {"green": "#00AF50", "yellow": "#E6C800", "red": "#FF5555"}
 ASSET_TYPES = {
     "codex": ("codex-logo.png", "image/png"),
     "claude": ("claude-logo.svg", "image/svg+xml"),
+    "claude_alt": ("claude-logo.svg", "image/svg+xml"),
     "grok": ("grok-logo.png", "image/png"),
     "gemini": ("gemini-logo.svg", "image/svg+xml"),
 }
@@ -130,6 +131,7 @@ def seven_day_percent(snapshot: ProviderSnapshot) -> Optional[int]:
 # stops reporting its five-hour window.
 PANEL_WINDOW_IDS = {
     "claude": ("5h", "7d"),
+    "claude_alt": ("5h", "7d"),
     "gemini": ("5h", "7d"),
 }
 

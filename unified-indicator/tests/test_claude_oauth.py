@@ -581,3 +581,77 @@ class UsageCommandTests(unittest.TestCase):
         from claude_oauth import _run_usage_command
 
         self.assertIn("DISABLE_AUTOUPDATER", inspect.getsource(_run_usage_command))
+
+
+class SecondAccountTests(unittest.TestCase):
+    def test_the_usage_command_runs_against_the_given_config_dir(self):
+        completed = mock.Mock(returncode=0, stdout="{}", stderr="")
+        with mock.patch("claude_oauth.subprocess.run", return_value=completed) as run:
+            from claude_oauth import _run_usage_command
+
+            _run_usage_command("/bin/claude", 5.0, Path("/home/x/.claude-alt"))
+
+        env = run.call_args.kwargs["env"]
+        self.assertEqual(env["CLAUDE_CONFIG_DIR"], "/home/x/.claude-alt")
+        self.assertEqual(env["DISABLE_AUTOUPDATER"], "1")
+
+    def test_the_first_account_leaves_claude_config_dir_alone(self):
+        completed = mock.Mock(returncode=0, stdout="{}", stderr="")
+        with mock.patch.dict(os.environ, {}, clear=False), mock.patch(
+            "claude_oauth.subprocess.run", return_value=completed
+        ) as run:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+            from claude_oauth import _run_usage_command
+
+            _run_usage_command("/bin/claude", 5.0)
+
+        self.assertNotIn("CLAUDE_CONFIG_DIR", run.call_args.kwargs["env"])
+
+    def test_a_refresh_stamps_the_path_it_was_given(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            credentials = Path(tmp) / ".credentials.json"
+            credentials.write_text(
+                _credential_json("expired", expires_at=1), encoding="utf-8"
+            )
+            stamp = Path(tmp) / "alt-refresh-attempt"
+            with mock.patch(
+                "claude_oauth.refresh_credentials", return_value=None
+            ) as refresh:
+                with self.assertRaises(ClaudeOAuthUnavailable):
+                    fetch_oauth_snapshot(
+                        credentials, allow_refresh=True, refresh_stamp_path=stamp
+                    )
+
+        self.assertEqual(refresh.call_args.kwargs["stamp_path"], stamp)
+
+
+class ResetLocaleTests(unittest.TestCase):
+    def test_reset_times_parse_under_a_non_english_locale(self):
+        import locale
+
+        previous = locale.setlocale(locale.LC_TIME)
+        for candidate in ("zh_TW.UTF-8", "de_DE.UTF-8", "fr_FR.UTF-8"):
+            try:
+                locale.setlocale(locale.LC_TIME, candidate)
+                break
+            except locale.Error:
+                continue
+        else:
+            self.skipTest("no non-English locale installed")
+        try:
+            windows = parse_usage_text(
+                "Current session: 40% used · resets Sep 18, 5pm (Asia/Taipei)",
+                now=datetime(2026, 9, 18, 3, 0, tzinfo=timezone.utc),
+            )
+        finally:
+            locale.setlocale(locale.LC_TIME, previous)
+        self.assertEqual(windows[0].resets_at, "2026-09-18T09:00:00+00:00")
+
+    def test_twelve_oclock_is_noon_and_midnight(self):
+        from claude_oauth import _parse_month_day_time
+
+        self.assertEqual(_parse_month_day_time("Sep 18, 12pm"), (9, 18, 12, 0))
+        self.assertEqual(_parse_month_day_time("Sep 18, 12am"), (9, 18, 0, 0))
+        self.assertEqual(_parse_month_day_time("Sep 18, 17:05"), (9, 18, 17, 5))
+        self.assertIsNone(_parse_month_day_time("Sep 18, 13pm"))
+        self.assertIsNone(_parse_month_day_time("Smarch 18, 5pm"))

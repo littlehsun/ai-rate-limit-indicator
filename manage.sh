@@ -20,16 +20,18 @@ UNIFIED_SERVICE="rate-limit-indicator.service"
 PUBLISH_SERVICE="rate-limit-publish.service"
 UNIFIED_CLI="$REAL_HOME/.local/share/rate-limit-indicator/unified/cli.py"
 
-PROVIDER_KEYS=(CODEX CLAUDE GROK GEMINI)
-PROVIDER_NAMES=(codex claude grok gemini)
+PROVIDER_KEYS=(CODEX CLAUDE CLAUDE_ALT GROK GEMINI)
+PROVIDER_NAMES=(codex claude claude_alt grok gemini)
 PROVIDER_SERVICES=(
     codex-rate-indicator.service
     claude-rate-indicator.service
+    ""
     grok-rate-indicator.service
     gemini-rate-indicator.service
 )
 PROVIDER_TIMERS=(
     codex-rate-wham-poll.timer
+    ""
     ""
     grok-rate-poll.timer
     gemini-rate-poll.timer
@@ -111,7 +113,9 @@ apply_provider() {
             systemctl --user disable --now "$timer" 2>/dev/null || true
         fi
     fi
-    systemctl --user stop "$service" 2>/dev/null || true
+    if [[ -n "$service" ]]; then
+        systemctl --user stop "$service" 2>/dev/null || true
+    fi
 }
 
 apply_config() {
@@ -218,6 +222,15 @@ install_manager() {
         printf '# has expired, instead of waiting for Claude Code to run. Linux only.\n' >> "$CONFIG_FILE"
         printf 'CLAUDE_AUTO_REFRESH=false\n' >> "$CONFIG_FILE"
     fi
+    if ! has_config_assignment CLAUDE_ALT; then
+        printf '\n# A second Claude Code account. Log it in with\n' >> "$CONFIG_FILE"
+        printf '#   CLAUDE_CONFIG_DIR=~/.claude-alt claude auth login\n' >> "$CONFIG_FILE"
+        printf '# then set CLAUDE_ALT=true and point CLAUDE_ALT_CONFIG_DIR at that\n' >> "$CONFIG_FILE"
+        printf '# directory. CLAUDE_ALT_LABEL renames it in the dropdown.\n' >> "$CONFIG_FILE"
+        printf 'CLAUDE_ALT=false\n' >> "$CONFIG_FILE"
+        printf '#CLAUDE_ALT_CONFIG_DIR=~/.claude-alt\n' >> "$CONFIG_FILE"
+        printf '#CLAUDE_ALT_LABEL="Claude (alt)"\n' >> "$CONFIG_FILE"
+    fi
     if ! has_config_assignment GROK_AUTO_REFRESH; then
         printf '\n# true opts in to running `grok models` when the Grok token has\n' >> "$CONFIG_FILE"
         printf '# expired, so the CLI refreshes its own credential.\n' >> "$CONFIG_FILE"
@@ -321,7 +334,7 @@ show_status() {
     local idx
     local configured
     local active
-    printf '%-8s %-10s %-10s\n' "PROVIDER" "CONFIG" "COLLECTOR"
+    printf '%-11s %-10s %-10s\n' "PROVIDER" "CONFIG" "COLLECTOR"
     for idx in "${!PROVIDER_KEYS[@]}"; do
         configured=false
         read_enabled "${PROVIDER_KEYS[$idx]}" && configured=true
@@ -330,7 +343,7 @@ show_status() {
         else
             active="file"
         fi
-        printf '%-8s %-10s %-10s\n' "${PROVIDER_NAMES[$idx]}" "$configured" "${active:-unknown}"
+        printf '%-11s %-10s %-10s\n' "${PROVIDER_NAMES[$idx]}" "$configured" "${active:-unknown}"
     done
     active="$(systemctl --user is-active "$UNIFIED_SERVICE" 2>/dev/null || true)"
     printf '\nUnified UI: %s\n' "${active:-unknown}"

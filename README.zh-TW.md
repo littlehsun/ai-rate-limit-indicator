@@ -106,6 +106,17 @@ DROPDOWN_PROVIDERS=codex,claude,grok,gemini
 
 # Panel、懸浮視窗與下拉選單共用的順序
 PROVIDER_ORDER=codex,grok,claude,gemini
+
+# 第二個 Claude Code 帳號，以獨立 provider（claude_alt）顯示。先把它登入到
+# 自己的資料夾：
+#   CLAUDE_CONFIG_DIR=~/.claude-alt claude auth login
+# 沒有預設資料夾，避免第一個帳號被顯示兩次。CLAUDE_ALT_AUTO_REFRESH 與
+# CLAUDE_ALT_USAGE_CLI 沒設定時沿用上面 CLAUDE_ 開頭的設定。要顯示它，把
+# claude_alt 加進 DISPLAY_PROVIDERS、DROPDOWN_PROVIDERS 和 PROVIDER_ORDER，
+# 或在 Display settings… 裡勾選。
+CLAUDE_ALT=false
+CLAUDE_ALT_CONFIG_DIR=~/.claude-alt
+CLAUDE_ALT_LABEL="Claude (alt)"
 ```
 
 `DISPLAY_MODE=auto` 會選擇最近有更新且 7D 數字變化最大的 provider；

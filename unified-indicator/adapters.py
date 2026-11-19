@@ -25,10 +25,11 @@ else:
         sys.path.append(str(path))
 
 
-PROVIDER_ORDER = ("codex", "claude", "grok", "gemini")
+PROVIDER_ORDER = ("codex", "claude", "claude_alt", "grok", "gemini")
 PROVIDER_LABELS = {
     "codex": "Codex",
     "claude": "Claude",
+    "claude_alt": "Claude (alt)",
     "grok": "Grok",
     "gemini": "Gemini",
 }
@@ -277,6 +278,7 @@ def load_snapshots(
     loaders: dict[str, Callable[[], ProviderSnapshot]] = {
         "codex": load_codex,
         "claude": load_claude,
+        "claude_alt": load_claude_alt,
         "grok": load_grok,
         "gemini": load_gemini,
     }
@@ -379,6 +381,54 @@ def load_codex() -> ProviderSnapshot:
 
 
 def load_claude() -> ProviderSnapshot:
+    return _load_claude_account("claude", PROVIDER_LABELS["claude"])
+
+
+def claude_alt_config_dir(
+    values: Optional[dict[str, str]] = None,
+) -> Optional[Path]:
+    """The second Claude Code account's config directory, from providers.env.
+
+    Log that account in with `CLAUDE_CONFIG_DIR=<dir> claude auth login` and
+    point CLAUDE_ALT_CONFIG_DIR at the same directory. There is no default:
+    guessing a directory could quietly show the first account twice.
+    """
+
+    config = values if values is not None else read_manager_config()
+    raw = config.get("CLAUDE_ALT_CONFIG_DIR", "").strip()
+    if not raw:
+        return None
+    return Path(os.path.expandvars(raw)).expanduser()
+
+
+def load_claude_alt() -> ProviderSnapshot:
+    config = read_manager_config()
+    label = config.get("CLAUDE_ALT_LABEL", "").strip() or PROVIDER_LABELS["claude_alt"]
+    config_dir = claude_alt_config_dir(config)
+    if config_dir is None:
+        return _no_data(
+            "claude_alt", "Set CLAUDE_ALT_CONFIG_DIR in providers.env", label
+        )
+    return _load_claude_account("claude_alt", label, config_dir=config_dir)
+
+
+def _claude_flag(
+    config: dict[str, str], prefix: str, name: str, default: str
+) -> bool:
+    # The second account follows the first account's switch unless it sets
+    # its own, so CLAUDE_AUTO_REFRESH=true covers both by default.
+    value = config.get(f"{prefix}_{name}")
+    if value is None and prefix != "CLAUDE":
+        value = config.get(f"CLAUDE_{name}")
+    return (value or default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _load_claude_account(
+    provider: str,
+    label: str,
+    *,
+    config_dir: Optional[Path] = None,
+) -> ProviderSnapshot:
     from claude_oauth import (
         ClaudeOAuthUnavailable,
         fetch_oauth_snapshot,
@@ -416,16 +466,30 @@ def load_claude() -> ProviderSnapshot:
     # tengu_oauth_refresh_token_cleared_on_disk -- and the user pays for it with
     # a full `claude auth login`. One credential here was lost that way while
     # this was being investigated.
+    config = read_manager_config()
+    prefix = provider.upper()
+    if config_dir is None:
+        # The first account keeps every path it always had, so an upgrade
+        # neither loses its cache nor resets its cooldowns.
+        credentials_path = cache_path = refresh_stamp = usage_stamp = None
+    else:
+        credentials_path = config_dir / ".credentials.json"
+        state = Path.home() / ".cache" / "rate-limit-indicator"
+        cache_path = state / f"{provider}-oauth.json"
+        refresh_stamp = state / f"{provider}-refresh-attempt"
+        usage_stamp = state / f"{provider}-usage-attempt"
+
     error = None
-    auto_refresh = read_manager_config().get("CLAUDE_AUTO_REFRESH", "false").lower()
     try:
         oauth_snapshot = fetch_oauth_snapshot(
-            allow_refresh=auto_refresh in {"1", "true", "yes", "on"}
+            credentials_path,
+            allow_refresh=_claude_flag(config, prefix, "AUTO_REFRESH", "false"),
+            refresh_stamp_path=refresh_stamp,
         )
-        write_cache(oauth_snapshot)
+        write_cache(oauth_snapshot, cache_path)
     except ClaudeOAuthUnavailable as exc:
         error = str(exc)
-        oauth_snapshot = read_cache()
+        oauth_snapshot = read_cache(cache_path)
         # The morning after an idle night lands here: the token expired and no
         # Claude Code ran to renew it. Claude Code itself will still print its
         # usage screen -- `claude -p /usage` is a slash command, free and
@@ -434,17 +498,18 @@ def load_claude() -> ProviderSnapshot:
         # stays a fallback behind the API, and a cache that is still fresh is
         # worth more than the seconds this costs.
         if oauth_snapshot is None or _freshness(oauth_snapshot.updated_at) != "fresh":
-            usage_cli = read_manager_config().get("CLAUDE_USAGE_CLI", "true").lower()
             from_cli = fetch_usage_with_cli(
-                enabled=usage_cli in {"1", "true", "yes", "on"}
+                enabled=_claude_flag(config, prefix, "USAGE_CLI", "true"),
+                stamp_path=usage_stamp,
+                config_dir=config_dir,
             )
             if from_cli is not None:
-                write_cache(from_cli)
+                write_cache(from_cli, cache_path)
                 oauth_snapshot = from_cli
                 error = None
 
     if oauth_snapshot is None:
-        return _no_data("claude", error)
+        return _no_data(provider, error, label)
 
     windows = tuple(
         UsageWindow(
@@ -456,8 +521,8 @@ def load_claude() -> ProviderSnapshot:
         for window in oauth_snapshot.windows
     )
     return ProviderSnapshot(
-        "claude",
-        "Claude",
+        provider,
+        label,
         oauth_snapshot.updated_at,
         windows,
         status=_freshness(oauth_snapshot.updated_at),
@@ -603,10 +668,14 @@ def load_gemini() -> ProviderSnapshot:
     )
 
 
-def _no_data(provider: str, reason: Optional[str] = None) -> ProviderSnapshot:
+def _no_data(
+    provider: str,
+    reason: Optional[str] = None,
+    label: Optional[str] = None,
+) -> ProviderSnapshot:
     return ProviderSnapshot(
         provider=provider,
-        label=PROVIDER_LABELS[provider],
+        label=label or PROVIDER_LABELS[provider],
         updated_at=None,
         windows=(),
         status="no_data",

@@ -90,7 +90,13 @@ class Snapshot:
         return None
 
 
-PROVIDER_ORDER = ("codex", "claude", "grok", "gemini")
+PROVIDER_ORDER = ("codex", "claude", "claude_alt", "grok", "gemini")
+# A second Claude account is something only some people have, so it is the one
+# provider that has to be asked for rather than switched off.
+OPT_IN_PROVIDERS = frozenset({"claude_alt"})
+DEFAULT_PROVIDERS = tuple(
+    name for name in PROVIDER_ORDER if name not in OPT_IN_PROVIDERS
+)
 
 # Which window leads for each provider, mirroring the widget. Every lead is a
 # weekly window: Codex and Grok only report one, so leading with 7D everywhere
@@ -99,6 +105,7 @@ PROVIDER_ORDER = ("codex", "claude", "grok", "gemini")
 # matter, so they ride along as numbers rather than disappearing.
 PROVIDER_WINDOWS: Dict[str, Dict[str, Sequence[str]]] = {
     "claude": {"bar": ("7d",), "also": ("5h",)},
+    "claude_alt": {"bar": ("7d",), "also": ("5h",)},
     # Antigravity reports a Gemini group and a Claude/GPT one. Only Gemini
     # leads; the Claude/GPT windows are listed underneath with their names
     # attached, the way the large widget does it.
@@ -264,7 +271,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
 @dataclass(frozen=True)
 class Settings:
     endpoint: str = DEFAULT_ENDPOINT
-    providers: Tuple[str, ...] = PROVIDER_ORDER
+    providers: Tuple[str, ...] = DEFAULT_PROVIDERS
     theme: str = "dracula"
     language: str = "zh-TW"
     interval: int = 60
@@ -320,10 +327,11 @@ def _enabled_providers(parser: configparser.ConfigParser) -> Tuple[str, ...]:
     """Read the per-provider switches, keeping the canonical display order."""
 
     if not parser.has_section("providers"):
-        return PROVIDER_ORDER
+        return DEFAULT_PROVIDERS
     enabled = []
     for name in PROVIDER_ORDER:
-        if parser.getboolean("providers", name, fallback=True):
+        fallback = name not in OPT_IN_PROVIDERS
+        if parser.getboolean("providers", name, fallback=fallback):
             enabled.append(name)
     return tuple(enabled)
 

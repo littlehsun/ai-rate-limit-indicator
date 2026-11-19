@@ -12,6 +12,7 @@ from adapters import (
     enabled_providers,
     read_display_state,
     load_claude,
+    load_claude_alt,
     load_codex,
     load_gemini,
     load_grok,
@@ -143,8 +144,81 @@ class AdapterTests(unittest.TestCase):
         ), patch("claude_oauth.write_cache") as write_cache:
             snapshot = load_claude()
 
-        write_cache.assert_called_once_with(oauth_snapshot)
+        write_cache.assert_called_once_with(oauth_snapshot, None)
         self.assertIsNone(snapshot.error)
+
+    def _alt_config(self, tmp: str, body: str) -> dict:
+        config = Path(tmp) / "providers.env"
+        config.write_text(body, encoding="utf-8")
+        return {"RATE_LIMIT_INDICATOR_CONFIG": str(config)}
+
+    def test_claude_alt_without_a_config_dir_says_what_to_set(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            "os.environ", self._alt_config(tmp, "CLAUDE_ALT=true\n")
+        ), patch("claude_oauth.fetch_oauth_snapshot") as fetch:
+            snapshot = load_claude_alt()
+
+        # Falling back to ~/.claude would show the first account twice.
+        fetch.assert_not_called()
+        self.assertEqual(snapshot.provider, "claude_alt")
+        self.assertEqual(snapshot.status, "no_data")
+        self.assertIn("CLAUDE_ALT_CONFIG_DIR", snapshot.error)
+
+    def test_claude_alt_reads_its_own_directory_and_keeps_its_own_state(self):
+        oauth_snapshot = ClaudeOAuthSnapshot(
+            updated_at=datetime.now(timezone.utc).isoformat(),
+            windows=(ClaudeOAuthWindow("7d", 30, None),),
+        )
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            "os.environ",
+            self._alt_config(
+                tmp,
+                f"CLAUDE_ALT_CONFIG_DIR={tmp}/alt\n"
+                "CLAUDE_ALT_LABEL='Claude (work)'\n"
+                "CLAUDE_AUTO_REFRESH=true\n",
+            ),
+        ), patch(
+            "claude_oauth.fetch_oauth_snapshot", return_value=oauth_snapshot
+        ) as fetch, patch("claude_oauth.write_cache") as write_cache:
+            snapshot = load_claude_alt()
+
+            credentials_path = fetch.call_args.args[0]
+            self.assertEqual(credentials_path, Path(tmp) / "alt" / ".credentials.json")
+        # The second account inherits CLAUDE_AUTO_REFRESH unless it sets its own.
+        self.assertTrue(fetch.call_args.kwargs["allow_refresh"])
+        self.assertEqual(
+            fetch.call_args.kwargs["refresh_stamp_path"].name,
+            "claude_alt-refresh-attempt",
+        )
+        self.assertEqual(write_cache.call_args.args[1].name, "claude_alt-oauth.json")
+        self.assertEqual(snapshot.provider, "claude_alt")
+        self.assertEqual(snapshot.label, "Claude (work)")
+        self.assertEqual(snapshot.windows[0].used_percent, 30)
+
+    def test_claude_alt_asks_its_own_cli_account(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            "os.environ",
+            self._alt_config(
+                tmp,
+                f"CLAUDE_ALT_CONFIG_DIR={tmp}/alt\n"
+                "CLAUDE_USAGE_CLI=true\n"
+                "CLAUDE_ALT_USAGE_CLI=false\n",
+            ),
+        ), patch(
+            "claude_oauth.fetch_oauth_snapshot",
+            side_effect=ClaudeOAuthUnavailable("expired"),
+        ), patch("claude_oauth.read_cache", return_value=None) as read_cache, patch(
+            "claude_oauth.fetch_usage_with_cli", return_value=None
+        ) as from_cli:
+            load_claude_alt()
+
+            self.assertEqual(from_cli.call_args.kwargs["config_dir"], Path(tmp) / "alt")
+        # Its own switch wins over the first account's.
+        self.assertFalse(from_cli.call_args.kwargs["enabled"])
+        self.assertEqual(
+            from_cli.call_args.kwargs["stamp_path"].name, "claude_alt-usage-attempt"
+        )
+        self.assertEqual(read_cache.call_args.args[0].name, "claude_alt-oauth.json")
 
     def test_no_data_without_a_reason_leaves_the_error_unset(self):
         snapshot = _no_data("codex")
@@ -198,7 +272,7 @@ class AdapterTests(unittest.TestCase):
             )
             self.assertEqual(
                 provider_display_order(read_manager_config(config)),
-                ("grok", "claude", "codex", "gemini"),
+                ("grok", "claude", "codex", "gemini", "claude_alt"),
             )
             saved = config.read_text(encoding="utf-8")
             self.assertNotIn("export DISPLAY_", saved)

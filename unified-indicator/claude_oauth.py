@@ -443,6 +443,7 @@ def fetch_oauth_snapshot(
     ] = None,
     now: Optional[datetime] = None,
     allow_refresh: Optional[bool] = None,
+    refresh_stamp_path: Optional[Path] = None,
 ) -> ClaudeOAuthSnapshot:
     try:
         credentials = read_credentials(credentials_path)
@@ -452,7 +453,10 @@ def fetch_oauth_snapshot(
         # is opt-in, and refresh_credentials returns None whenever it declines,
         # so without CLAUDE_AUTO_REFRESH this raises exactly as it used to.
         credentials = refresh_credentials(
-            credentials_path, opener=opener, enabled=allow_refresh
+            credentials_path,
+            opener=opener,
+            enabled=allow_refresh,
+            stamp_path=refresh_stamp_path,
         )
         if credentials is None:
             raise
@@ -550,20 +554,66 @@ def _parse_reset(clause: str, *, now: datetime) -> Optional[str]:
     except (ZoneInfoNotFoundError, ValueError):
         tz = now.astimezone().tzinfo
 
-    for fmt in ("%b %d, %I:%M%p", "%b %d, %I%p", "%b %d, %H:%M"):
+    parsed = _parse_month_day_time(when)
+    if parsed is None:
+        return None
+    month, day, hour, minute = parsed
+    local_now = now.astimezone(tz)
+    for year in (local_now.year, local_now.year + 1):
         try:
-            parsed = datetime.strptime(when, fmt)
+            candidate = datetime(year, month, day, hour, minute, tzinfo=tz)
         except ValueError:
             continue
-        local_now = now.astimezone(tz)
-        for year in (local_now.year, local_now.year + 1):
-            candidate = parsed.replace(year=year, tzinfo=tz)
-            # A reset is ahead of us. December wrapping into January is the
-            # only reason the year is worth guessing at all.
-            if candidate >= local_now - timedelta(hours=1):
-                return candidate.astimezone(timezone.utc).isoformat()
-        return None
+        # A reset is ahead of us. December wrapping into January is the only
+        # reason the year is worth guessing at all.
+        if candidate >= local_now - timedelta(hours=1):
+            return candidate.astimezone(timezone.utc).isoformat()
     return None
+
+
+# The CLI writes English month names whatever the locale. strptime's %b reads
+# them in the process locale instead, and GTK switches the indicator to the
+# desktop's locale at import, so on a zh_TW desktop %b never matched "Sep" and
+# every reset time read from the CLI came out empty.
+MONTHS = {
+    name: index
+    for index, name in enumerate(
+        ("jan", "feb", "mar", "apr", "may", "jun",
+         "jul", "aug", "sep", "oct", "nov", "dec"),
+        start=1,
+    )
+}
+MONTH_DAY_TIME = re.compile(
+    r"^(?P<month>[a-z]{3})[a-z]*\.?\s+(?P<day>\d{1,2}),\s*"
+    r"(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<ampm>[ap]m)?$",
+    re.IGNORECASE,
+)
+
+
+def _parse_month_day_time(when: str) -> Optional[tuple[int, int, int, int]]:
+    """Read "Sep 18, 5pm", "Sep 18, 8:59am" or "Sep 18, 17:00"."""
+
+    match = MONTH_DAY_TIME.match(when)
+    if not match:
+        return None
+    month = MONTHS.get(match.group("month").lower())
+    if month is None:
+        return None
+    day = int(match.group("day"))
+    hour = int(match.group("hour"))
+    minute = int(match.group("minute") or 0)
+    ampm = (match.group("ampm") or "").lower()
+    if ampm:
+        if not 1 <= hour <= 12:
+            return None
+        hour = hour % 12 + (12 if ampm == "pm" else 0)
+    elif match.group("minute") is None:
+        # A bare "17" with neither minutes nor am/pm is not a format the CLI
+        # writes; guessing at it is how a wrong countdown would get in.
+        return None
+    if hour > 23 or minute > 59:
+        return None
+    return month, day, hour, minute
 
 
 def parse_usage_text(text: str, *, now: Optional[datetime] = None) -> tuple[ClaudeOAuthWindow, ...]:
@@ -592,7 +642,16 @@ def parse_usage_text(text: str, *, now: Optional[datetime] = None) -> tuple[Clau
     return tuple(windows)
 
 
-def _run_usage_command(claude_bin: str, timeout: float) -> str:
+def _run_usage_command(
+    claude_bin: str,
+    timeout: float,
+    config_dir: Optional[Path] = None,
+) -> str:
+    env = {**os.environ, "DISABLE_AUTOUPDATER": "1"}
+    if config_dir is not None:
+        # A second account lives in its own config directory. Without this the
+        # CLI would answer for whichever account ~/.claude holds.
+        env["CLAUDE_CONFIG_DIR"] = str(config_dir)
     result = subprocess.run(
         (claude_bin, "-p", USAGE_COMMAND, "--output-format", "json"),
         stdin=subprocess.DEVNULL,
@@ -602,7 +661,7 @@ def _run_usage_command(claude_bin: str, timeout: float) -> str:
         # Without this the CLI can resume an unfinished auto-update on every
         # spawn. CodexBar measured what that costs when something probes it on
         # a timer: 90 GiB pulled in three days.
-        env={**os.environ, "DISABLE_AUTOUPDATER": "1"},
+        env=env,
     )
     if result.returncode != 0:
         raise ClaudeOAuthUnavailable(
@@ -619,6 +678,7 @@ def fetch_usage_with_cli(
     runner: Optional[Callable[[str, float], str]] = None,
     stamp_path: Optional[Path] = None,
     now: Optional[datetime] = None,
+    config_dir: Optional[Path] = None,
 ) -> Optional[ClaudeOAuthSnapshot]:
     """Ask Claude Code for its own usage screen when the API read fails.
 
@@ -650,9 +710,12 @@ def fetch_usage_with_cli(
         return None
     record_refresh_attempt(stamp, now=now.timestamp())
 
-    run = runner or _run_usage_command
     try:
-        payload = json.loads(run(claude_bin, timeout))
+        if runner is not None:
+            output = runner(claude_bin, timeout)
+        else:
+            output = _run_usage_command(claude_bin, timeout, config_dir)
+        payload = json.loads(output)
         text = payload.get("result") if isinstance(payload, Mapping) else None
         windows = parse_usage_text(text or "", now=now)
     except (
