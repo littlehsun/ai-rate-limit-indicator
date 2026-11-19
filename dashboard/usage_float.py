@@ -59,6 +59,7 @@ from usage_monitor import (  # noqa: E402
     age_text,
     default_config_path,
     load_themes,
+    lead_window,
     ordered_windows,
     percent_label,
     relative_time,
@@ -570,11 +571,11 @@ def build_provider_row(
             error_detail=None,
         )
     windows = ordered_windows(provider)
-    # Compact mode keeps the lead window only. `ordered_windows` already puts
-    # the weekly one first for every provider, so the one bar left standing is
-    # the one that is comparable across all four.
+    # Compact mode keeps the lead window only: the weekly one, which is the
+    # bar that is comparable across every provider.
     if compact:
-        windows = windows[:1]
+        lead = lead_window(provider)
+        windows = (lead,) if lead is not None else ()
     extras, extras_detail = ((), ()) if compact else split_extras(provider.extras)
     return ProviderRow(
         provider=provider.provider,

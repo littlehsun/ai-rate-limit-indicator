@@ -409,7 +409,7 @@ function cardNode(provider) {
   // Compact is a widget frame, where a provider that reports four windows
   // would push every card after it out of the box. Two is what the small and
   // medium widgets show for the same reason; the full page still lists them
-  // all. The server has already ordered them lead-first.
+  // all. The server has already ordered them, 5H above 7D.
   const windows = CONFIG.compact ? provider.windows.slice(0, 2) : provider.windows;
   for (const win of windows) card.append(windowNode(win));
   if (provider.extras && provider.extras.length) {

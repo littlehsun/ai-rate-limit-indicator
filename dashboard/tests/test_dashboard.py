@@ -15,6 +15,7 @@ from usage_monitor import (
     TerminalRenderer,
     absent_window,
     load_settings,
+    lead_window,
     ordered_windows,
     parse_snapshot,
     percent_label,
@@ -131,15 +132,20 @@ class ParseTests(unittest.TestCase):
 
 
 class WindowOrderTests(unittest.TestCase):
-    def test_claude_leads_with_the_weekly_window(self):
+    def test_claude_lists_5h_above_7d_like_codex(self):
         snapshot = parse_snapshot(_payload(), fetched_at=1_000.0, reachable=True)
 
-        # Every lead is a weekly window so four bars of the same width stay
-        # comparable, which is why 7D comes before 5H here.
         self.assertEqual(
             [window.id for window in ordered_windows(snapshot.provider("claude"))],
-            ["7d", "5h"],
+            ["5h", "7d"],
         )
+
+    def test_the_lead_is_still_the_weekly_window(self):
+        snapshot = parse_snapshot(_payload(), fetched_at=1_000.0, reachable=True)
+
+        # A lone bar is only comparable across providers when it is the 7D one.
+        self.assertEqual(lead_window(snapshot.provider("claude")).id, "7d")
+        self.assertEqual(lead_window(snapshot.provider("grok")).id, "weekly")
 
     def test_grok_falls_back_to_what_it_actually_reported(self):
         snapshot = parse_snapshot(_payload(), fetched_at=1_000.0, reachable=True)
@@ -158,9 +164,9 @@ class WindowOrderTests(unittest.TestCase):
 
         # Antigravity dropped the 5H bucket. Leaving it out would move every
         # row after it, so the slot stays and reports nothing.
-        self.assertEqual([window.id for window in windows], ["7d", "5h", "claude-gpt-7d"])
-        self.assertIsNone(windows[1].used_percent)
-        self.assertEqual(percent_label(windows[1]), "--")
+        self.assertEqual([window.id for window in windows], ["5h", "7d", "claude-gpt-7d"])
+        self.assertIsNone(windows[0].used_percent)
+        self.assertEqual(percent_label(windows[0]), "--")
 
     def test_an_absent_window_is_labelled_by_its_cadence(self):
         self.assertEqual(absent_window("claude-gpt-5h").label, "5H")
@@ -474,9 +480,9 @@ class SerialisationTests(unittest.TestCase):
 
         rows = json.loads(snapshot_as_json(snapshot, ("claude",)))["providers"]
 
-        # The page renders what it is given, so the lead-first order has to
+        # The page renders what it is given, so the display order has to
         # survive the wire rather than be recomputed in JavaScript.
-        self.assertEqual([window["id"] for window in rows[0]["windows"]], ["7d", "5h"])
+        self.assertEqual([window["id"] for window in rows[0]["windows"]], ["5h", "7d"])
 
 
 class WebTests(unittest.TestCase):

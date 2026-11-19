@@ -98,11 +98,11 @@ DEFAULT_PROVIDERS = tuple(
     name for name in PROVIDER_ORDER if name not in OPT_IN_PROVIDERS
 )
 
-# Which window leads for each provider, mirroring the widget. Every lead is a
-# weekly window: Codex and Grok only report one, so leading with 7D everywhere
-# is what makes four bars of the same width comparable -- a 5H bar beside a 7D
-# bar measures different things at identical length. Session windows still
-# matter, so they ride along as numbers rather than disappearing.
+# Which windows each provider shows. "bar" is the lead, kept when there is room
+# for only one (see lead_window): always the weekly window, because a 5H bar
+# beside a 7D bar measures different things at identical length. "also" rides
+# along. Cards list "also" above "bar" so every provider reads 5H then 7D, the
+# order Codex reports them in.
 PROVIDER_WINDOWS: Dict[str, Dict[str, Sequence[str]]] = {
     "claude": {"bar": ("7d",), "also": ("5h",)},
     "claude_alt": {"bar": ("7d",), "also": ("5h",)},
@@ -403,14 +403,19 @@ def absent_window(window_id: str) -> UsageWindow:
 
 
 def ordered_windows(provider: ProviderSnapshot) -> Tuple[UsageWindow, ...]:
-    """Return the provider's windows with its lead first, slots held."""
+    """Return the provider's windows, 5H above 7D, slots held.
+
+    Listed the way Codex reports them -- session above week -- so every card
+    reads in the same order. Which window leads is a separate question that
+    `lead_window` answers.
+    """
 
     wanted = PROVIDER_WINDOWS.get(provider.provider)
     if wanted is None:
         return provider.windows
     by_id = {window.id: window for window in provider.windows}
     chosen: List[UsageWindow] = []
-    for window_id in tuple(wanted["bar"]) + tuple(wanted["also"]):
+    for window_id in tuple(wanted["also"]) + tuple(wanted["bar"]):
         # Grok labels its weekly window `weekly` rather than `7d`, so a lead
         # that is not found falls back to whatever the provider reported first
         # -- the same fallback the widget relies on.
@@ -422,6 +427,25 @@ def ordered_windows(provider: ProviderSnapshot) -> Tuple[UsageWindow, ...]:
     if all(window.used_percent is None for window in chosen) and provider.windows:
         return provider.windows
     return tuple(chosen)
+
+
+def lead_window(provider: ProviderSnapshot) -> Optional[UsageWindow]:
+    """The one window to keep when there is room for only one.
+
+    The weekly window, wherever the provider has one: Codex and Grok report
+    only that cadence in common, so a lone bar is only comparable across
+    providers when it is the 7D one.
+    """
+
+    windows = ordered_windows(provider)
+    if not windows:
+        return None
+    wanted = PROVIDER_WINDOWS.get(provider.provider)
+    lead_ids = set(wanted["bar"]) if wanted else {"7d", "weekly"}
+    for window in windows:
+        if window.id in lead_ids:
+            return window
+    return windows[0]
 
 
 def percent_label(window: UsageWindow) -> str:

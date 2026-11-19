@@ -134,8 +134,8 @@ class RowTests(unittest.TestCase):
             snapshot(claude), ("claude",), now=0.0, text=self.text, compact=True
         )
         self.assertEqual(len(rows[0].windows), 1)
-        # ordered_windows leads with the weekly window for Claude, and that is
-        # the one bar that is comparable across all four providers.
+        # The weekly window is kept even though 5H is listed first, because it
+        # is the one bar that is comparable across all four providers.
         self.assertEqual(rows[0].windows[0].label, "7D")
 
     def test_full_mode_keeps_every_window_and_the_extras(self):
