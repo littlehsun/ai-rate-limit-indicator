@@ -10,6 +10,7 @@ from adapters import (
     display_settings,
     dropdown_providers,
     enabled_providers,
+    float_settings,
     read_display_state,
     load_claude,
     load_claude_alt,
@@ -219,6 +220,32 @@ class AdapterTests(unittest.TestCase):
             from_cli.call_args.kwargs["stamp_path"].name, "claude_alt-usage-attempt"
         )
         self.assertEqual(read_cache.call_args.args[0].name, "claude_alt-oauth.json")
+
+    def test_float_settings_default_to_following_the_panel(self):
+        mode, shown, order = float_settings(
+            {"DISPLAY_MODE": "custom", "DISPLAY_PROVIDERS": "grok,codex",
+             "PROVIDER_ORDER": "grok,codex"}
+        )
+        self.assertEqual(mode, "follow")
+        self.assertEqual(shown, ("grok", "codex"))
+        self.assertEqual(order[:2], ("grok", "codex"))
+
+    def test_float_settings_roundtrip_keeps_unticked_providers_in_place(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp) / "providers.env"
+            write_display_settings(
+                "custom",
+                ("codex",),
+                path=config,
+                float_mode="custom",
+                float_providers=("claude_alt", "claude"),
+                float_order=("claude_alt", "grok", "claude"),
+            )
+            mode, shown, order = float_settings(read_manager_config(config))
+        self.assertEqual(mode, "custom")
+        self.assertEqual(shown, ("claude_alt", "claude"))
+        self.assertEqual(order[:3], ("claude_alt", "grok", "claude"))
+        self.assertEqual(set(order), {"codex", "claude", "claude_alt", "grok", "gemini"})
 
     def test_no_data_without_a_reason_leaves_the_error_unset(self):
         snapshot = _no_data("codex")

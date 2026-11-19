@@ -23,6 +23,7 @@ from gi.repository import AppIndicator3, GLib, Gtk, Pango, PangoCairo  # noqa: E
 from adapters import (  # noqa: E402
     display_settings,
     dropdown_providers,
+    float_settings,
     load_snapshots,
     provider_display_order,
     read_manager_config,
@@ -638,16 +639,23 @@ class UnifiedRateIndicator:
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         window.add(root)
+        # Two tabs rather than one long page: with the widget's own list the
+        # single page grew taller than a laptop screen.
+        notebook = Gtk.Notebook()
+        root.pack_start(notebook, True, True, 0)
+        panel_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        panel_page.set_border_width(12)
+        notebook.append_page(panel_page, Gtk.Label(label="Panel & dropdown"))
         intro = Gtk.Label(
             label=(
-                "Auto shows the provider whose 7D usage just changed, on the "
-                "panel and the floating widget. Custom shows every provider "
-                "checked under Indicator, in the order shared with the dropdown."
+                "Auto shows the provider whose 7D usage just changed. Custom "
+                "shows every provider checked under Indicator, in the order "
+                "shared with the dropdown."
             ),
             xalign=0,
         )
         intro.set_line_wrap(True)
-        root.pack_start(intro, False, False, 0)
+        panel_page.pack_start(intro, False, False, 0)
 
         auto_radio = Gtk.RadioButton.new_with_label(None, "Auto: recent 7D change")
         custom_radio = Gtk.RadioButton.new_with_label_from_widget(
@@ -662,7 +670,7 @@ class UnifiedRateIndicator:
         mode_box.pack_start(custom_radio, False, False, 0)
         mode_frame = Gtk.Frame(label="Mode")
         mode_frame.add(mode_box)
-        root.pack_start(mode_frame, False, False, 0)
+        panel_page.pack_start(mode_frame, False, False, 0)
 
         provider_grid = Gtk.Grid()
         provider_grid.set_border_width(8)
@@ -671,19 +679,19 @@ class UnifiedRateIndicator:
         provider_grid.set_column_homogeneous(False)
         provider_frame = Gtk.Frame(label="Providers")
         provider_frame.add(provider_grid)
-        root.pack_start(provider_frame, True, True, 0)
+        panel_page.pack_start(provider_frame, True, True, 0)
 
         def rebuild_rows() -> None:
             for child in list(provider_grid.get_children()):
                 provider_grid.remove(child)
             provider_grid.attach(Gtk.Label(label="Provider", xalign=0), 0, 0, 1, 1)
             indicator_header = Gtk.Label(label="Indicator")
-            indicator_header.set_tooltip_text("Panel icon and floating widget")
+            indicator_header.set_tooltip_text("Panel icon")
             provider_grid.attach(indicator_header, 1, 0, 1, 1)
             provider_grid.attach(Gtk.Label(label="Dropdown"), 2, 0, 1, 1)
             order_header = Gtk.Label(label="Order")
             order_header.set_tooltip_text(
-                "Shared by the panel, the floating widget, and the dropdown"
+                "Shared by the panel and the dropdown"
             )
             provider_grid.attach(order_header, 3, 0, 1, 1)
             separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
@@ -699,7 +707,8 @@ class UnifiedRateIndicator:
                 )
                 panel_check = Gtk.CheckButton()
                 panel_check.set_tooltip_text(
-                    "Show in the panel indicator and the floating widget"
+                    "Show in the panel indicator (and the floating widget "
+                    "while it follows the panel)"
                 )
                 panel_check.set_halign(Gtk.Align.CENTER)
                 panel_check.set_active(provider in selected)
@@ -752,6 +761,83 @@ class UnifiedRateIndicator:
             order[index], order[target] = order[target], order[index]
             rebuild_rows()
 
+        # The floating widget gets its own list and order, or follows the
+        # panel. Only providers the tray loaded can be offered, but the saved
+        # order keeps the rest so they come back where they were.
+        float_mode, float_shown, float_saved_order = float_settings(config)
+        float_order = [p for p in float_saved_order if p in available]
+        float_order.extend(p for p in available if p not in float_order)
+        float_selected = set(float_shown)
+        float_grid = Gtk.Grid()
+        float_grid.set_border_width(8)
+        float_grid.set_row_spacing(6)
+        float_grid.set_column_spacing(18)
+        follow_radio = Gtk.RadioButton.new_with_label(
+            None, "Follow the panel indicator"
+        )
+        float_custom_radio = Gtk.RadioButton.new_with_label_from_widget(
+            follow_radio, "Custom list and order"
+        )
+        follow_radio.set_active(float_mode != "custom")
+        float_custom_radio.set_active(float_mode == "custom")
+
+        def rebuild_float_rows() -> None:
+            for child in list(float_grid.get_children()):
+                float_grid.remove(child)
+            float_grid.attach(Gtk.Label(label="Provider", xalign=0), 0, 0, 1, 1)
+            float_grid.attach(Gtk.Label(label="Show"), 1, 0, 1, 1)
+            float_grid.attach(Gtk.Label(label="Order"), 2, 0, 1, 1)
+            float_grid.attach(
+                Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL), 0, 1, 3, 1
+            )
+            for index, provider in enumerate(float_order):
+                row_index = index + 2
+                float_grid.attach(
+                    Gtk.Label(label=labels.get(provider, provider.title()), xalign=0),
+                    0, row_index, 1, 1,
+                )
+                show_check = Gtk.CheckButton()
+                show_check.set_halign(Gtk.Align.CENTER)
+                show_check.set_active(provider in float_selected)
+                show_check.connect(
+                    "toggled",
+                    lambda button, name=provider: (
+                        float_selected.add(name)
+                        if button.get_active()
+                        else float_selected.discard(name)
+                    ),
+                )
+                float_grid.attach(show_check, 1, row_index, 1, 1)
+                order_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+                for icon, offset, enabled in (
+                    ("go-up-symbolic", -1, index > 0),
+                    ("go-down-symbolic", 1, index < len(float_order) - 1),
+                ):
+                    button = Gtk.Button.new_from_icon_name(icon, Gtk.IconSize.BUTTON)
+                    button.set_size_request(36, 32)
+                    button.set_sensitive(enabled)
+                    button.connect(
+                        "clicked",
+                        lambda _button, idx=index, step=offset: move_float_row(idx, step),
+                    )
+                    order_box.pack_start(button, False, False, 0)
+                float_grid.attach(order_box, 2, row_index, 1, 1)
+            float_grid.set_sensitive(float_custom_radio.get_active())
+            float_grid.show_all()
+
+        def move_float_row(index: int, offset: int) -> None:
+            target = index + offset
+            if 0 <= target < len(float_order):
+                float_order[index], float_order[target] = (
+                    float_order[target],
+                    float_order[index],
+                )
+                rebuild_float_rows()
+
+        float_custom_radio.connect(
+            "toggled", lambda button: float_grid.set_sensitive(button.get_active())
+        )
+
         def apply_settings(_button) -> None:
             ordered_selected = tuple(
                 provider for provider in order if provider in selected
@@ -760,16 +846,46 @@ class UnifiedRateIndicator:
                 provider for provider in order if provider in dropdown_selected
             )
             selected_mode = "custom" if custom_radio.get_active() else "auto"
+            # Providers the tray did not load this time keep their saved slot.
+            full_float_order = float_order + [
+                p for p in float_saved_order if p not in float_order
+            ]
             write_display_settings(
                 selected_mode,
                 ordered_selected,
                 dropdown=ordered_dropdown,
                 provider_order=tuple(order),
+                float_mode="custom" if float_custom_radio.get_active() else "follow",
+                float_providers=tuple(
+                    p for p in full_float_order
+                    if p in float_selected
+                    or (p not in available and p in float_shown)
+                ),
+                float_order=tuple(full_float_order),
             )
             window.destroy()
             self.update()
 
         rebuild_rows()
+        if float_widget_available():
+            float_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            float_page.set_border_width(12)
+            float_intro = Gtk.Label(
+                label=(
+                    "Follow shows what the panel shows. Custom gives the "
+                    "widget its own providers and order."
+                ),
+                xalign=0,
+            )
+            float_intro.set_line_wrap(True)
+            float_page.pack_start(float_intro, False, False, 0)
+            float_page.pack_start(follow_radio, False, False, 0)
+            float_page.pack_start(float_custom_radio, False, False, 0)
+            float_frame = Gtk.Frame(label="Providers")
+            float_frame.add(float_grid)
+            float_page.pack_start(float_frame, True, True, 0)
+            notebook.append_page(float_page, Gtk.Label(label="Floating widget"))
+            rebuild_float_rows()
         actions = Gtk.ButtonBox(orientation=Gtk.Orientation.HORIZONTAL)
         actions.set_layout(Gtk.ButtonBoxStyle.END)
         cancel = Gtk.Button(label="Cancel")

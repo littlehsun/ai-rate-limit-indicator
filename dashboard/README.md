@@ -162,7 +162,9 @@ and `interval` are shared with the terminal monitor. Which providers appear,
 and in what order, follows the tray indicator: the Indicator column and the
 shared order in Display settings… (`DISPLAY_MODE`, `DISPLAY_PROVIDERS` and
 `PROVIDER_ORDER` in `providers.env`). Auto mode shows the provider the panel
-icon is currently showing. `--providers` overrides that for one launch. What
+icon is currently showing. The Floating widget tab in Display settings…
+(`FLOAT_MODE=custom`, `FLOAT_PROVIDERS`, `FLOAT_ORDER`) gives the widget its
+own list and order instead. `--providers` overrides either for one launch. What
 you change from the menu — position, compact, opacity, scale, on top — is
 remembered in `~/.local/state/rate-limit-indicator/float.json` rather than
 written back into `config.ini`, so the file you hand-edit stays yours.

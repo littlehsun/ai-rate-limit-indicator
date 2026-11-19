@@ -123,9 +123,18 @@ CLAUDE_ALT_LABEL="Claude (alt)"
 沒有新變化時會維持目前選擇。
 
 `DISPLAY_MODE=custom` 會同時顯示 `DISPLAY_PROVIDERS` 中勾選的 provider，
-並依 `PROVIDER_ORDER` 排序。懸浮視窗跟著同一份選擇：Custom 顯示
+並依 `PROVIDER_ORDER` 排序。懸浮視窗預設跟著同一份選擇：Custom 顯示
 Indicator 欄勾選的 provider，Auto 顯示 panel 圖示目前那一個。
 這些設定也可以從下拉選單的 `Display settings…` 修改。
+
+想讓懸浮視窗有自己的顯示項目和順序，可以在 `Display settings…` 的
+Floating widget 分頁設定，或直接寫：
+
+```bash
+FLOAT_MODE=custom                          # follow（預設）或 custom
+FLOAT_PROVIDERS=claude,claude_alt          # custom 模式下顯示的項目
+FLOAT_ORDER=claude_alt,claude,codex,grok,gemini
+```
 
 套用設定：
 

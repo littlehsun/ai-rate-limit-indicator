@@ -628,6 +628,35 @@ class IndicatorDisplayTests(unittest.TestCase):
             )
             self.assertEqual(indicator_providers(config, state), ("claude", "codex"))
 
+    def test_the_widget_s_own_list_overrides_the_panel(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "providers.env"
+            config.write_text(
+                "CODEX=true\nCLAUDE=true\nCLAUDE_ALT=true\n"
+                "DISPLAY_MODE=custom\nDISPLAY_PROVIDERS=codex\n"
+                "FLOAT_MODE=custom\nFLOAT_PROVIDERS=claude,claude_alt\n"
+                "FLOAT_ORDER=claude_alt,codex,claude\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                indicator_providers(config, Path(directory) / "display.json"),
+                ("claude_alt", "claude"),
+            )
+
+    def test_follow_mode_ignores_the_widget_s_saved_list(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "providers.env"
+            config.write_text(
+                "CODEX=true\nCLAUDE=true\n"
+                "DISPLAY_MODE=custom\nDISPLAY_PROVIDERS=codex\n"
+                "FLOAT_MODE=follow\nFLOAT_PROVIDERS=claude\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                indicator_providers(config, Path(directory) / "display.json"),
+                ("codex",),
+            )
+
     def test_an_explicit_provider_argument_does_not_follow_the_indicator(self):
         source = inspect.getsource(run)
         self.assertIn("follow_indicator=args.providers is None", source)

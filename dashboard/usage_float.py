@@ -689,6 +689,13 @@ def indicator_providers(
         return None
     try:
         config = module.read_manager_config(config_path)
+        # The widget's own list, when Display settings gives it one, wins over
+        # following the panel. An older adapters.py has no float_settings.
+        own = getattr(module, "float_settings", None)
+        if own is not None:
+            float_mode, float_shown, _order = own(config)
+            if float_mode == "custom":
+                return float_shown
         mode, selected = module.display_settings(config)
         order = module.provider_display_order(config)
         state_path = (

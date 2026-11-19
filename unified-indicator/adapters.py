@@ -136,12 +136,48 @@ def provider_display_order(
     return tuple(configured)
 
 
+def float_settings(
+    values: Optional[dict[str, str]] = None,
+) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
+    """The floating widget's own list: (mode, shown providers, full order).
+
+    FLOAT_MODE=follow (the default) shows whatever the panel shows. custom
+    shows FLOAT_PROVIDERS in FLOAT_ORDER, independent of the panel. The order
+    keeps unticked providers too, so ticking one back puts it where it was.
+    """
+
+    config = values if values is not None else read_manager_config()
+    mode = config.get("FLOAT_MODE", "").lower()
+    if mode not in {"follow", "custom"}:
+        mode = "follow"
+    order = [
+        provider
+        for provider in config.get("FLOAT_ORDER", "").lower().split(",")
+        if provider in PROVIDER_ORDER
+    ]
+    for provider in provider_display_order(config):
+        if provider not in order:
+            order.append(provider)
+    if "FLOAT_PROVIDERS" in config:
+        wanted = {
+            provider
+            for provider in config["FLOAT_PROVIDERS"].lower().split(",")
+            if provider in PROVIDER_ORDER
+        }
+    else:
+        wanted = set(display_settings(config)[1])
+    return mode, tuple(p for p in order if p in wanted), tuple(order)
+
+
 def write_display_settings(
     mode: str,
     providers: tuple[str, ...],
     path: Optional[Path] = None,
     dropdown: Optional[tuple[str, ...]] = None,
     provider_order: Optional[tuple[str, ...]] = None,
+    float_mode: Optional[str] = None,
+    float_providers: Optional[tuple[str, ...]] = None,
+    float_order: Optional[tuple[str, ...]] = None,
 ) -> Path:
     config_path = path or Path(
         os.environ.get("RATE_LIMIT_INDICATOR_CONFIG", default_manager_config())
@@ -159,6 +195,16 @@ def write_display_settings(
     if provider_order is not None:
         updates["PROVIDER_ORDER"] = ",".join(
             provider for provider in provider_order if provider in PROVIDER_ORDER
+        )
+    if float_mode is not None:
+        updates["FLOAT_MODE"] = "custom" if float_mode == "custom" else "follow"
+    if float_providers is not None:
+        updates["FLOAT_PROVIDERS"] = ",".join(
+            provider for provider in float_providers if provider in PROVIDER_ORDER
+        )
+    if float_order is not None:
+        updates["FLOAT_ORDER"] = ",".join(
+            provider for provider in float_order if provider in PROVIDER_ORDER
         )
     try:
         lines = config_path.read_text(encoding="utf-8").splitlines()
